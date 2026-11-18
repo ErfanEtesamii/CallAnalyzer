@@ -215,3 +215,44 @@ def test_pipeline_surfaces_quota_error_to_user(tmp_path):
     run(p.run(aid, str(wav)))
     a = db.get(aid)
     assert a["status"] == "failed" and a["error_code"] == "llm_rate_limit" and "Gemini" in a["error_message"]
+
+
+def _make_wav(path, seconds, rate=16000):
+    import wave
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * rate * seconds)
+
+
+def test_stt_chunks_long_audio_and_offsets(tmp_path):
+    import asyncio, httpx
+    wav = tmp_path / "a.wav"; _make_wav(wav, 25)
+    calls = []
+    def handler(req):
+        calls.append(1)
+        return httpx.Response(200, json={"segments": [{"start": 0, "end": 1, "text": "سلام"}]})
+    p = OpenAISTT("k", chunk_seconds=10, transport=httpx.MockTransport(handler))
+    tr = asyncio.run(p.transcribe(str(wav)))
+    assert len(calls) == 3 and [s.start for s in tr.segments] == [0, 10, 20]
+
+
+def test_stt_retries_5xx_then_succeeds(tmp_path):
+    import asyncio, httpx
+    wav = tmp_path / "a.wav"; _make_wav(wav, 3)
+    n = {"c": 0}
+    def handler(req):
+        n["c"] += 1
+        return httpx.Response(524) if n["c"] < 3 else httpx.Response(200, json={"text": "ok", "duration": 3})
+    async def nosleep(_): pass
+    p = OpenAISTT("k", transport=httpx.MockTransport(handler), sleep=nosleep)
+    assert asyncio.run(p.transcribe(str(wav))).segments[0].text == "ok" and n["c"] == 3
+
+
+def test_stt_persistent_5xx_is_friendly_error(tmp_path):
+    import asyncio, httpx, pytest
+    from app.stt.base import ProviderUnavailable
+    wav = tmp_path / "a.wav"; _make_wav(wav, 3)
+    async def nosleep(_): pass
+    p = OpenAISTT("k", transport=httpx.MockTransport(lambda r: httpx.Response(524)), sleep=nosleep)
+    with pytest.raises(ProviderUnavailable, match="524"):
+        asyncio.run(p.transcribe(str(wav)))
