@@ -128,9 +128,12 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
         if pipe.analyzer is None:
             raise HTTPException(503, "کلید مدل تحلیل روی سرور تنظیم نشده است (ANTHROPIC_API_KEY یا GEMINI_API_KEY).")
         ex = db.get_by_uid(unique_id)
-        if ex and not force and ex["status"] != "failed":
+        
+        live = unique_id in pipe.inflight and not pipe.inflight[unique_id].done()
+        # فقط کار تمام‌شده یا کاری که واقعاً در حال اجراست «موجود» حساب می‌شود؛ کار نیمه‌کاره‌ی بی‌پردازنده دوباره اجرا می‌شود.
+        if ex and not force and (ex["status"] == "done" or live):
             return {"id": ex["id"], "status": ex["status"], "existing": True}
-        if unique_id in pipe.inflight and not pipe.inflight[unique_id].done():
+        if live:
             return {"id": ex["id"] if ex else None, "status": "queued", "existing": True}
         dur = hms_to_seconds(panel_duration)
         talk = int(talk_seconds) if talk_seconds.strip().isdigit() else dur
