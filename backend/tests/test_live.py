@@ -32,6 +32,13 @@ class RouterLLM:
                 raise RuntimeError("x")
             n = user.count("\n") and sum(1 for ln in user.split("<قطعه‌های_جدید>")[1].splitlines() if ln[:1].isdigit())
             return (self.labeler_out(n) if self.labeler_out else {"labels": [SELLER, CUSTOMER] * n}), {}
+        if tool["name"] == "refine_turns":  # ویرایش‌گر: نقش‌ها مثل برچسب‌زن، متن بدون تغییر
+            self.label_calls += 1
+            if self.boom:
+                raise RuntimeError("x")
+            lines = [ln.split("] ", 1)[1] for ln in user.split("<نوبت‌های_جدید>")[1].splitlines() if ln[:1].isdigit() and "] " in ln]
+            labels = (self.labeler_out(len(lines)) if self.labeler_out else {"labels": [SELLER, CUSTOMER] * len(lines)})["labels"]
+            return {"turns": [{"speaker": sp, "text": lines[i % len(lines)]} for i, sp in enumerate(labels)]}, {}  # طول نامتناسب → heuristic
         return _good(), {"tokens_in": 1, "tokens_out": 1}
 
 
@@ -331,3 +338,40 @@ def test_refiner_guards_bad_text_and_falls_back_on_error():
     r = DiarizedRefiner(Boom(), "m")
     out = run(r.label([Segment(0, 2, "سلام", "spk5"), Segment(2, 4, "بله", "spk9"), Segment(4, 6, "خب", "spk5")]))
     assert [s.speaker for s in out] == [SELLER, CUSTOMER, SELLER] and out[1].text == "بله"
+
+
+def test_openai_compat_llm_json_and_errors():
+    import json
+
+    import httpx
+
+    from app.analysis.errors import LLMError
+    from app.analysis.openai_compat import OpenAICompatLLM
+    seen = {}
+
+    def ok(req):
+        seen["b"] = json.loads(req.content)
+        seen["auth"] = req.headers["authorization"]
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"a": 1}'}, "finish_reason": "stop"}],
+                                         "usage": {"prompt_tokens": 5, "completion_tokens": 2}})
+
+    llm = OpenAICompatLLM("k", transport=httpx.MockTransport(ok))
+    out, usage = run(llm.call_tool(system=[{"type": "text", "text": "s"}], user="u", tool={"name": "t", "input_schema": {"type": "object"}},
+                                   model="deepseek-chat", temperature=0))
+    assert out == {"a": 1} and usage["tokens_in"] == 5 and seen["auth"] == "Bearer k"
+    assert seen["b"]["response_format"] == {"type": "json_object"} and "JSON" in seen["b"]["messages"][1]["content"]
+    for code, expect in [(401, "llm_auth"), (402, "llm_balance")]:
+        bad = OpenAICompatLLM("k", transport=httpx.MockTransport(lambda r, c=code: httpx.Response(c, json={"error": {"message": "x"}})))
+        with pytest.raises(LLMError) as ei:
+            run(bad.call_tool(system=[{"type": "text", "text": "s"}], user="u", tool={"name": "t", "input_schema": {}}, model="m", temperature=0))
+        assert ei.value.code == expect
+    trunc = OpenAICompatLLM("k", transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"choices": [{"message": {"content": '{"a":'}, "finish_reason": "length"}]})))
+    with pytest.raises(LLMError) as ei:
+        run(trunc.call_tool(system=[{"type": "text", "text": "s"}], user="u", tool={"name": "t", "input_schema": {}}, model="m", temperature=0))
+    assert ei.value.code == "llm_bad_output"
+
+
+def test_refiner_without_diarization_uses_llm_role_and_fixes_text():
+    llm = _FakeLLM(lambda u: [{"speaker": "seller", "text": "سلام، آقای پسندیده."}, {"speaker": "customer", "text": "سلام و درود."}])
+    out = run(DiarizedRefiner(llm, "m").label([Segment(0, 2, "سلام آقای پسندیده"), Segment(2, 4, "سلام و ندیگه")]))
+    assert [(s.speaker, s.text) for s in out] == [(SELLER, "سلام، آقای پسندیده."), (CUSTOMER, "سلام و درود.")]

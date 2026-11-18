@@ -64,7 +64,10 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
     sellers = json.loads(Path(s.sellers_file).read_text(encoding="utf-8")) if Path(s.sellers_file).exists() else {}
     vocab = Path("domain_vocab.txt").read_text(encoding="utf-8").replace("\n", "، ") if Path("domain_vocab.txt").exists() else ""
     if llm is None:
-        if s.llm_provider == "gemini":
+        if s.llm_provider == "deepseek":
+            from app.analysis.openai_compat import OpenAICompatLLM
+            llm = OpenAICompatLLM(s.deepseek_api_key, base_url=s.llm_base_url) if s.deepseek_api_key else None
+        elif s.llm_provider == "gemini":
             llm = GeminiLLM(s.gemini_api_key, thinking_budget=s.gemini_thinking_budget) if s.gemini_api_key else None
         else:
             llm = AnthropicLLM(s.anthropic_api_key) if s.anthropic_api_key else None

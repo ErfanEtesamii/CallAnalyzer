@@ -143,7 +143,7 @@ _REFINE_SYSTEM = (
     "تو ویراستار رونوشت تماس تلفنی فارسی هستی. رونوشت را یک مدل گفتار-به-متن با تفکیک گوینده‌ی صوتی ساخته: "
     "شناسه‌ی spkN یعنی یک نفر مشخص (ثابت در کل تماس)، ولی نمی‌دانیم کدام کارشناس است و کدام مشتری. "
     "برای هر نوبت دو کار بکن: ۱) نقش: seller (کارشناس فروش؛ تماس‌گیرنده که خود و شرکتش را معرفی و پیشنهاد می‌دهد)، customer (مشتری)، "
-    "ivr (پیام ضبط‌شده/تلفن گویا/صندوق صوتی/منوی صوتی) یا music (فقط موسیقی/نویز بی‌معنی). همه‌ی نوبت‌های یک spk معمولاً یک نقش دارند. "
+    "ivr (پیام ضبط‌شده/تلفن گویا/صندوق صوتی/منوی صوتی) یا music (فقط موسیقی/نویز بی‌معنی). همه‌ی نوبت‌های یک spk معمولاً یک نقش دارند؛ اگر شناسه «؟» است نقش را از محتوا و نوبت گفتگو حدس بزن. "
     "۲) متن را ویرایش املایی و نگارشی کن: غلط‌های املایی و شنیداری آشکار را با کمک بافت گفتگو و واژگان تخصصی درست کن، علائم نگارشی بگذار. "
     "هرگز مطلب اضافه نکن، چیزی حذف نکن و معنی را عوض نکن؛ اگر مطمئن نیستی همان متن را نگه دار. "
     "تنها خروجی: یک شیء JSON با کلید turns (آرایه‌ای هم‌طول با نوبت‌های جدید، هر عنصر {speaker, text})."
@@ -152,6 +152,10 @@ _REFINE_TOOL = {"name": "refine_turns", "description": "نقش و متن ویر�
                 "input_schema": {"type": "object", "required": ["turns"], "properties": {"turns": {"type": "array", "items": {
                     "type": "object", "required": ["speaker", "text"],
                     "properties": {"speaker": {"type": "string", "enum": [SELLER, CUSTOMER, IVR, MUSIC]}, "text": {"type": "string"}}}}}}}
+
+
+def _is_spk(x: str | None) -> bool:
+    return bool(x) and x.startswith("spk")
 
 
 class DiarizedRefiner:
@@ -163,6 +167,11 @@ class DiarizedRefiner:
         self.history: list[Segment] = []
         self.roles: dict[str, str] = {}
         self.llm_batches = 0
+
+    def _heur(self, s: Segment) -> str:
+        human = [x for x in self.history if x.speaker not in SPECIAL]
+        last = human[-1] if human else None
+        return heuristic_labels([s], last, last.speaker if last else None)[0]
 
     def _fallback_role(self, spk: str) -> str:
         if spk not in self.roles:
@@ -181,7 +190,7 @@ class DiarizedRefiner:
         if res is not None:
             votes: dict[str, dict[str, int]] = {}
             for s, (sp, _) in zip(todo, res, strict=True):
-                if sp in (SELLER, CUSTOMER) and s.speaker not in self.roles:
+                if sp in (SELLER, CUSTOMER) and _is_spk(s.speaker) and s.speaker not in self.roles:
                     votes.setdefault(s.speaker, {}).setdefault(sp, 0)
                     votes[s.speaker][sp] += 1
             for spk, v in votes.items():
@@ -197,8 +206,10 @@ class DiarizedRefiner:
                 s.speaker = llm_role
             elif res is None and looks_ivr(s.text):
                 s.speaker = IVR
-            else:
+            elif _is_spk(s.speaker):
                 s.speaker = self.roles.get(s.speaker) or llm_role or self._fallback_role(s.speaker)
+            else:  # بدون تفکیک صوتی (Whisper): نقش از مدل، یا heuristic
+                s.speaker = llm_role or self._heur(s)
             if res is not None:
                 s.text = text
         self.history.extend(segs)
@@ -207,7 +218,7 @@ class DiarizedRefiner:
     async def _ask(self, segs: list[Segment]) -> list[tuple[str, str]]:
         ctx = "\n".join(_ctx_line(s) for s in self.history[-self.context_lines:])
         hint = "، ".join(f"{k}={v}" for k, v in self.roles.items()) or "(هنوز تعیین نشده)"
-        new = "\n".join(f"{i + 1}. [{s.speaker}] {s.text}" for i, s in enumerate(segs))
+        new = "\n".join(f"{i + 1}. [{s.speaker if _is_spk(s.speaker) else '؟'}] {s.text}" for i, s in enumerate(segs))
         voc = f"<واژگان>{self.vocab}</واژگان>\n" if self.vocab else ""
         user = (f"{voc}<نقش‌های_تعیین‌شده>{hint}</نقش‌های_تعیین‌شده>\n<گفتگوی_قبلی>\n{ctx or '(شروع تماس)'}\n</گفتگوی_قبلی>\n"
                 f"<نوبت‌های_جدید>\n{new}\n</نوبت‌های_جدید>\nفقط {len(segs)} عنصر برگردان.")
@@ -232,7 +243,7 @@ def label_model(settings) -> str:
     env = os.environ.get("LABEL_MODEL", "").strip()
     if env:
         return env
-    return "gemini-3.5-flash-lite" if settings.llm_provider == "gemini" else "claude-haiku-5-5"
+    return {"gemini": "gemini-3.5-flash-lite", "deepseek": settings.analysis_model}.get(settings.llm_provider, "claude-haiku-5-5")
 
 
 def add_routes(app, pipe, auth, owned) -> None:
