@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 
@@ -33,11 +34,15 @@ def _extract_json(text: str) -> dict:
 
 class GeminiLLM:
     def __init__(self, api_key: str, *, transport: httpx.AsyncBaseTransport | None = None,
-                 thinking_budget: int | None = None, max_retries: int = 3, sleep=asyncio.sleep):
+                 thinking_budget: int | None = None, max_retries: int = 3, sleep=asyncio.sleep,
+                 fallback_models: list[str] | None = None):
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY تنظیم نشده است")
         self.api_key, self.transport, self.thinking_budget = api_key, transport, thinking_budget
         self.max_retries, self._sleep = max_retries, sleep
+        # مدل‌های جایگزین هنگام شلوغی/سهمیه (GEMINI_FALLBACK_MODELS، جداشده با کاما)
+        env = os.environ.get("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite,gemini-3.6-flash")
+        self.fallback_models = fallback_models if fallback_models is not None else [m.strip() for m in env.split(",") if m.strip()]
 
     async def _post(self, model: str, body: dict) -> dict:
         async with httpx.AsyncClient(timeout=300, transport=self.transport) as c:
@@ -51,14 +56,32 @@ class GeminiLLM:
                     await self._sleep(min(60, 15 * 2 ** i))
                     continue
                 if r.status_code == 429:
-                    raise LLMError("llm_rate_limit", "سهمیه‌ی رایگان Gemini موقتاً تمام شده است؛ کمی بعد دوباره تلاش کنید.")
+                    e = LLMError("llm_rate_limit", "سهمیه‌ی رایگان Gemini موقتاً تمام شده است؛ کمی بعد دوباره تلاش کنید.")
+                    e.try_next = True
+                    raise e
                 if r.status_code in (400, 403) and "API key" in r.text:
                     raise LLMError("llm_auth", "کلید Gemini نامعتبر است (GEMINI_API_KEY).")
                 if r.status_code == 404:
                     raise LLMError("llm_model", f"مدل «{model}» پیدا نشد؛ ANALYSIS_MODEL را بررسی کنید.")
                 log.error("gemini http %s", r.status_code)  # بدون بدنه (ممکن است محتوا داشته باشد)
-                raise LLMError("llm_http", f"خطای Gemini ({r.status_code}).")
+                e = LLMError("llm_http", f"خطای Gemini ({r.status_code}).")
+                e.try_next = r.status_code in _RETRY_STATUS
+                raise e
         raise LLMError("llm_http", "خطای Gemini.")
+
+    async def _post_with_fallback(self, model: str, body: dict) -> dict:
+        models = [model, *[m for m in self.fallback_models if m != model]]
+        last: LLMError | None = None
+        for m in models:
+            try:
+                return await self._post(m, body)
+            except LLMError as e:
+                if not getattr(e, "try_next", False):
+                    raise  # کلید/مدل/محتوا: جایگزین کمکی نمی‌کند
+                log.warning("gemini %s unavailable (%s); trying next model", m, e.code)
+                last = e
+        assert last is not None
+        raise last
 
     async def call_tool(self, *, system, user, tool, model, temperature):
         schema = json.dumps(tool["input_schema"], ensure_ascii=False)
@@ -72,7 +95,7 @@ class GeminiLLM:
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": gen}
         tin = tout = 0
         for attempt in range(2):  # یک بار دوباره اگر JSON خراب یا نیمه‌کاره بود
-            j = await self._post(model, body)
+            j = await self._post_with_fallback(model, body)
             um = j.get("usageMetadata", {})
             tin += um.get("promptTokenCount", 0)
             tout += um.get("candidatesTokenCount", 0) + um.get("thoughtsTokenCount", 0)
