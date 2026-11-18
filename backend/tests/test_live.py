@@ -9,7 +9,7 @@ from app.analysis.rubric_loader import load_rubric
 from app.config import Settings
 from app.db import DB
 from app.jobs import Pipeline
-from app.live import CUSTOMER, SELLER, LiveStore, SpeakerLabeler, heuristic_labels
+from app.live import CUSTOMER, SELLER, DiarizedRefiner, LiveStore, SpeakerLabeler, heuristic_labels
 from app.stt.base import Segment, Transcript
 from tests.test_core import _good, _tone
 
@@ -249,3 +249,85 @@ def test_gemini_400_shows_api_reason():
     with pytest.raises(LLMError) as ei:
         run(GeminiLLM("k", transport=t, fallback_models=[])._post("m", {}))
     assert "Unsupported thinking config" in str(ei.value)
+
+
+# ---- Grok STT + DiarizedRefiner ----
+def test_build_turns_by_speaker_gap_and_length():
+    from app.stt.providers.grok_provider import build_turns
+    w = lambda t, a, b, sp: {"text": t, "start": a, "end": b, "speaker": sp}  # noqa: E731
+    segs = build_turns([w("سلام", 0, .5, 0), w("وقت", .6, .9, 0), w("بخیر", 1, 1.4, 0), w("بله", 1.6, 1.9, 1),
+                        w("بفرمایید", 2, 2.5, 1), w("ممنون", 6, 6.5, 1)])
+    assert [(s.speaker, s.text) for s in segs] == [("spk0", "سلام وقت بخیر"), ("spk1", "بله بفرمایید"), ("spk1", "ممنون")]
+    assert segs[0].start == 0 and segs[0].end == 1.4
+
+
+def test_grok_stt_request_and_batches(tmp_path):
+    import httpx
+
+    from app.stt.providers.grok_provider import GrokSTT
+    wav = tmp_path / "a.wav"
+    _tone(wav, 30, 0.5)
+    seen = {}
+
+    def handler(req):
+        seen["auth"], seen["body"] = req.headers["authorization"], req.content
+        words = [{"text": f"w{i}", "start": i * 2.0, "end": i * 2.0 + 1, "speaker": i % 2} for i in range(25)]
+        return httpx.Response(200, json={"words": words, "duration": 30, "text": "x"})
+
+    got = []
+
+    async def cb(part):
+        got.append(len(part))
+
+    tr = run(GrokSTT("xk", vocab="فراز هنر، شب یلدا", transport=httpx.MockTransport(handler), compress_bitrate="", batch_turns=10).transcribe(str(wav), on_segments=cb))
+    assert seen["auth"] == "Bearer xk" and b'name="diarize"' in seen["body"] and b'name="keyterm"' in seen["body"]
+    assert seen["body"].rfind(b'name="file"') > seen["body"].rfind(b'name="keyterm"')  # فایل آخرین فیلد
+    assert sum(got) == len(tr.segments) and got[0] == 10 and tr.segments[0].speaker == "spk0"
+
+
+def test_grok_music_gap_detected_only_when_loud(tmp_path):
+    from app.stt.providers.grok_provider import music_gaps
+    wav = tmp_path / "a.wav"
+    _tone(wav, 30, 0.5)  # کل فایل «صدا» دارد
+    segs = [Segment(0, 5, "a", "spk0"), Segment(15, 20, "b", "spk1")]
+    out = music_gaps(segs, str(wav), 30)
+    assert [(m.speaker, round(m.start), round(m.end)) for m in out] == [("music", 5, 15), ("music", 20, 30)]
+    quiet = tmp_path / "q.wav"
+    _tone(quiet, 0, 30)
+    assert music_gaps(segs, str(quiet), 30) == []
+
+
+class _FakeLLM:
+    def __init__(self, turns):
+        self.turns, self.calls = turns, 0
+
+    async def call_tool(self, **kw):
+        self.calls += 1
+        return {"turns": self.turns(kw["user"])}, {}
+
+
+def test_refiner_roles_spelling_and_stable_mapping():
+    segs = [Segment(0, 3, "سلام آقای پسندیده", "spk1"), Segment(3, 5, "سلام وندیگه", "spk0"), Segment(5, 9, "من از فراز خانر", "spk1")]
+    llm = _FakeLLM(lambda u: [{"speaker": "seller", "text": "سلام، آقای پسندیده."}, {"speaker": "customer", "text": "سلام و درود."},
+                              {"speaker": "seller", "text": "من از فراز هنر هستم."}])
+    r = DiarizedRefiner(llm, "m")
+    out = run(r.label(segs))
+    assert [s.speaker for s in out] == [SELLER, CUSTOMER, SELLER] and out[2].text == "من از فراز هنر هستم."
+    # دسته‌ی بعد: مدل اشتباهاً نقش را برعکس بدهد؛ نگاشت ثابت اعمال می‌شود. ivr حفظ می‌شود
+    llm.turns = lambda u: [{"speaker": "customer", "text": "بله"}, {"speaker": "ivr", "text": "پیام ضبط شده"}]
+    out2 = run(r.label([Segment(10, 11, "بله", "spk1"), Segment(12, 14, "پیام ضبط شده", "spk0")]))
+    assert [s.speaker for s in out2] == [SELLER, "ivr"]
+
+
+def test_refiner_guards_bad_text_and_falls_back_on_error():
+    seg = Segment(0, 3, "سلام وقت بخیر", "spk0")
+    llm = _FakeLLM(lambda u: [{"speaker": "seller", "text": "x" * 200}])  # طول غیرعادی → متن اصلی
+    assert run(DiarizedRefiner(llm, "m").label([seg]))[0].text == "سلام وقت بخیر"
+
+    class Boom:
+        async def call_tool(self, **kw):
+            raise RuntimeError("down")
+
+    r = DiarizedRefiner(Boom(), "m")
+    out = run(r.label([Segment(0, 2, "سلام", "spk5"), Segment(2, 4, "بله", "spk9"), Segment(4, 6, "خب", "spk5")]))
+    assert [s.speaker for s in out] == [SELLER, CUSTOMER, SELLER] and out[1].text == "بله"

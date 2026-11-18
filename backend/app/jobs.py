@@ -16,7 +16,7 @@ from app.analysis.scoring import percentile_rank
 from app.audio import preprocess as pp
 from app.config import Settings
 from app.db import DB
-from app.live import CUSTOMER, SELLER, LiveStore, SpeakerLabeler, label_model
+from app.live import CUSTOMER, SELLER, DiarizedRefiner, LiveStore, SpeakerLabeler, label_model
 from app.stt.base import ProviderUnavailable, Segment, Transcript
 from app.stt.nonspeech import SPECIAL
 from app.util import normalize_fa_text
@@ -93,7 +93,7 @@ class Pipeline:
                 s.text = normalize_fa_text(s.text)
             tr.segments = [s for s in tr.segments if s.text]
             self.db.save_transcript(aid, tr.provider, tr.to_json(), {"speech_ratio": info.speech_ratio, "rms": info.rms})
-            self.db.log_usage(aid, "stt", tr.provider, secs=info.duration, cost=0.0 if self.settings.stt_provider == "groq" else info.duration / 60 * COST["stt_per_min"])
+            self.db.log_usage(aid, "stt", tr.provider, secs=info.duration, cost=0.0 if self.settings.stt_provider == "groq" else info.duration / 3600 * 0.10 if self.settings.stt_provider == "grok" else info.duration / 60 * COST["stt_per_min"])
             text = " ".join(s.text for s in tr.segments)
             if pp.looks_like_voicemail(info.duration, len({s.speaker for s in tr.segments if s.speaker and s.speaker not in SPECIAL}), text):
                 self._close_no_conversation(aid, "پیغام‌گیر/صندوق صوتی تشخیص داده شد.")
@@ -120,7 +120,11 @@ class Pipeline:
         self.live.reset(aid)
         stt = self.stt_factory()
         llm = getattr(self.analyzer, "llm", None) if self.analyzer else None
-        labeler = SpeakerLabeler(llm, label_model(self.settings))
+        if getattr(stt, "raw_diarization", False):
+            vf = Path("domain_vocab.txt")
+            labeler = DiarizedRefiner(llm, label_model(self.settings), vocab=vf.read_text(encoding="utf-8").replace("\n", "، ")[:600] if vf.exists() else "")
+        else:
+            labeler = SpeakerLabeler(llm, label_model(self.settings))
 
         async def on_segments(part: list[Segment]) -> None:
             for s in part:

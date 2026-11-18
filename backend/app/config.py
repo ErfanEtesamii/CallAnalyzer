@@ -31,6 +31,7 @@ class Settings:
     stt_provider: str = "mock"
     openai_api_key: str = ""
     groq_api_key: str = ""
+    xai_api_key: str = ""
     stt_model: str = ""
     llm_provider: str = "anthropic"     # anthropic | gemini
     gemini_api_key: str = ""
@@ -63,6 +64,7 @@ class Settings:
             stt_provider=e("STT_PROVIDER", "mock"),
             openai_api_key=e("OPENAI_API_KEY", ""),
             groq_api_key=e("GROQ_API_KEY", ""),
+            xai_api_key=e("XAI_API_KEY", ""),
             stt_model=e("STT_MODEL", ""),
             llm_provider=e("LLM_PROVIDER", "anthropic").strip().lower(),
             gemini_api_key=e("GEMINI_API_KEY", ""),

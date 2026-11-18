@@ -16,6 +16,9 @@ def build_provider(settings: Settings, name: str | None = None, vocab_prompt: st
         from app.stt.providers.openai_provider import OpenAISTT
         return OpenAISTT(settings.groq_api_key, model=settings.stt_model or "whisper-large-v3", prompt=vocab_prompt,
                          base_url="https://api.groq.com/openai/v1", name="groq", key_name="GROQ_API_KEY", max_prompt_chars=600)
+    if name == "grok":  # Grok STT (xAI): رونویسی + تفکیک گوینده از صدا؛ اصلاح و نقش‌دهی با مدل زبانی (DiarizedRefiner)
+        from app.stt.providers.grok_provider import GrokSTT
+        return GrokSTT(settings.xai_api_key, model=settings.stt_model or "grok-voice-transcribe-2.0", vocab=vocab_prompt)
     if name == "gemini":  # رونویسی + تفکیک گوینده روی خود صدا؛ اگر GROQ_API_KEY باشد، برای تکه‌های ناموفق جایگزین است
         import os
         from app.stt.providers.gemini_provider import GeminiSTT

@@ -139,12 +139,100 @@ class SpeakerLabeler:
         return [str(x).strip().lower() for x in labels] if isinstance(labels, list) else None
 
 
+_REFINE_SYSTEM = (
+    "تو ویراستار رونوشت تماس تلفنی فارسی هستی. رونوشت را یک مدل گفتار-به-متن با تفکیک گوینده‌ی صوتی ساخته: "
+    "شناسه‌ی spkN یعنی یک نفر مشخص (ثابت در کل تماس)، ولی نمی‌دانیم کدام کارشناس است و کدام مشتری. "
+    "برای هر نوبت دو کار بکن: ۱) نقش: seller (کارشناس فروش؛ تماس‌گیرنده که خود و شرکتش را معرفی و پیشنهاد می‌دهد)، customer (مشتری)، "
+    "ivr (پیام ضبط‌شده/تلفن گویا/صندوق صوتی/منوی صوتی) یا music (فقط موسیقی/نویز بی‌معنی). همه‌ی نوبت‌های یک spk معمولاً یک نقش دارند. "
+    "۲) متن را ویرایش املایی و نگارشی کن: غلط‌های املایی و شنیداری آشکار را با کمک بافت گفتگو و واژگان تخصصی درست کن، علائم نگارشی بگذار. "
+    "هرگز مطلب اضافه نکن، چیزی حذف نکن و معنی را عوض نکن؛ اگر مطمئن نیستی همان متن را نگه دار. "
+    "تنها خروجی: یک شیء JSON با کلید turns (آرایه‌ای هم‌طول با نوبت‌های جدید، هر عنصر {speaker, text})."
+)
+_REFINE_TOOL = {"name": "refine_turns", "description": "نقش و متن ویرایش‌شده‌ی هر نوبت",
+                "input_schema": {"type": "object", "required": ["turns"], "properties": {"turns": {"type": "array", "items": {
+                    "type": "object", "required": ["speaker", "text"],
+                    "properties": {"speaker": {"type": "string", "enum": [SELLER, CUSTOMER, IVR, MUSIC]}, "text": {"type": "string"}}}}}}}
+
+
+class DiarizedRefiner:
+    """برای STTهایی که گوینده را از صدا می‌دهند (spk0/spk1): مدل زبانی املا را اصلاح و نقش را تعیین می‌کند؛ بعد از آن منتشر می‌شود.
+    نگاشت spk→نقش بعد از اولین دسته ثابت می‌ماند تا وسط تماس جابه‌جا نشود. هر خطا → نقش از ترتیب (نفر اول کارشناس) و متن اصلی."""
+
+    def __init__(self, llm, model: str, context_lines: int = 12, vocab: str = ""):
+        self.llm, self.model, self.context_lines, self.vocab = llm, model, context_lines, vocab
+        self.history: list[Segment] = []
+        self.roles: dict[str, str] = {}
+        self.llm_batches = 0
+
+    def _fallback_role(self, spk: str) -> str:
+        if spk not in self.roles:
+            self.roles[spk] = SELLER if SELLER not in self.roles.values() else CUSTOMER
+        return self.roles[spk]
+
+    async def label(self, segs: list[Segment]) -> list[Segment]:
+        todo = [s for s in segs if s.speaker not in SPECIAL]
+        res = None
+        if todo and self.llm is not None:
+            try:
+                res = await self._ask(todo)
+                self.llm_batches += 1
+            except Exception as e:  # noqa: BLE001 — ویرایش هرگز پایپ‌لاین را نمی‌شکند
+                log.warning("refine failed (%s); using order-based roles", type(e).__name__)
+        if res is not None:
+            votes: dict[str, dict[str, int]] = {}
+            for s, (sp, _) in zip(todo, res, strict=True):
+                if sp in (SELLER, CUSTOMER) and s.speaker not in self.roles:
+                    votes.setdefault(s.speaker, {}).setdefault(sp, 0)
+                    votes[s.speaker][sp] += 1
+            for spk, v in votes.items():
+                self.roles[spk] = max(v, key=lambda k: v[k])
+            if len(set(self.roles.values())) < 2 and len(self.roles) >= 2:  # هر دو spk یک نقش شدند: دومی را برعکس کن
+                first = next(iter(self.roles))
+                for spk in self.roles:
+                    if spk != first:
+                        self.roles[spk] = CUSTOMER if self.roles[first] == SELLER else SELLER
+        for i, s in enumerate(todo):
+            llm_role, text = (res[i] if res is not None else (None, s.text))
+            if llm_role in (IVR, MUSIC):
+                s.speaker = llm_role
+            elif res is None and looks_ivr(s.text):
+                s.speaker = IVR
+            else:
+                s.speaker = self.roles.get(s.speaker) or llm_role or self._fallback_role(s.speaker)
+            if res is not None:
+                s.text = text
+        self.history.extend(segs)
+        return segs
+
+    async def _ask(self, segs: list[Segment]) -> list[tuple[str, str]]:
+        ctx = "\n".join(_ctx_line(s) for s in self.history[-self.context_lines:])
+        hint = "، ".join(f"{k}={v}" for k, v in self.roles.items()) or "(هنوز تعیین نشده)"
+        new = "\n".join(f"{i + 1}. [{s.speaker}] {s.text}" for i, s in enumerate(segs))
+        voc = f"<واژگان>{self.vocab}</واژگان>\n" if self.vocab else ""
+        user = (f"{voc}<نقش‌های_تعیین‌شده>{hint}</نقش‌های_تعیین‌شده>\n<گفتگوی_قبلی>\n{ctx or '(شروع تماس)'}\n</گفتگوی_قبلی>\n"
+                f"<نوبت‌های_جدید>\n{new}\n</نوبت‌های_جدید>\nفقط {len(segs)} عنصر برگردان.")
+        out, _ = await self.llm.call_tool(system=[{"type": "text", "text": _REFINE_SYSTEM}], user=user, tool=_REFINE_TOOL,
+                                          model=self.model, temperature=0.0)
+        turns = out.get("turns") if isinstance(out, dict) else None
+        if not isinstance(turns, list) or len(turns) != len(segs):
+            raise ValueError("bad refine output")
+        res = []
+        for s, t in zip(segs, turns, strict=True):
+            sp = str(t.get("speaker", "")).strip().lower() if isinstance(t, dict) else ""
+            if sp not in _ALLOWED:
+                raise ValueError("bad role")
+            tx = str(t.get("text", "")).strip()
+            ok = tx and 0.6 <= len(tx) / max(1, len(s.text)) <= 1.6  # محافظ در برابر حذف/افزودن مطلب
+            res.append((sp, tx if ok else s.text))
+        return res
+
+
 def label_model(settings) -> str:
     """مدل سبک برای برچسب‌زنی: LABEL_MODEL، وگرنه یک مدل سبک مناسب هر ارائه‌دهنده."""
     env = os.environ.get("LABEL_MODEL", "").strip()
     if env:
         return env
-    return "gemini-3.5-flash-lite" if settings.llm_provider == "gemini" else settings.analysis_model
+    return "gemini-3.5-flash-lite" if settings.llm_provider == "gemini" else "claude-haiku-5-5"
 
 
 def add_routes(app, pipe, auth, owned) -> None:
