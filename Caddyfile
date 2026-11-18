@@ -1,0 +1,5 @@
+# دامنه‌ی خود را جایگزین کنید (برای شبکه‌ی داخلی: tls internal)
+analyzer.example.local {
+  tls internal
+  reverse_proxy backend:8000
+}

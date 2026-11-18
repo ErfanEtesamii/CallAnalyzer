@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>تحلیل تماس</title>
+<link rel="stylesheet" href="../src/sidepanel.css"></head>
+<body>
+<header class="top">
+  <span class="logo" id="logo" aria-hidden="true"></span>
+  <h1>تحلیل تماس</h1>
+  <span id="conn" class="conn" role="status"><i></i><span>در حال بررسی</span></span>
+  <button class="ib" id="theme" aria-label="تغییر تم"></button>
+  <button class="ib" id="settings" aria-label="تنظیمات"></button>
+</header>
+<main id="view" aria-live="polite"></main>
+<nav class="tabs" role="tablist" aria-label="بخش‌ها"></nav>
+<script src="mock-chrome.js"></script>
+<script src="../src/lib/settings.js"></script>
+<script src="../src/lib/csv.js"></script>
+<script>if(window.__tab)addEventListener("DOMContentLoaded",()=>{});</script>
+<script src="../src/sidepanel.js"></script>
+</body></html>
+
+<script>if(window.__tab){setTimeout(()=>document.querySelector("#tab-"+window.__tab)?.click(),50)}</script>

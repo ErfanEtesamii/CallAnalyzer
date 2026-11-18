@@ -1,0 +1,9 @@
+.env
+*.wav
+*.db
+data/
+node_modules/
+__pycache__/
+.pytest_cache/
+dist/
+*.zip

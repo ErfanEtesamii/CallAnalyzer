@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>تنظیمات تحلیل تماس</title>
+<link rel="stylesheet" href="sidepanel.css">
+<style>
+main{max-width:720px;margin:var(--s-6) auto;padding:0 var(--s-4)}
+fieldset{border:0;margin:0;padding:0}legend{font-weight:700;font-size:16px;margin-bottom:var(--s-3)}
+label.f{display:grid;gap:4px;margin-bottom:var(--s-4);font-weight:600}
+.hint{font-weight:400;color:var(--text-2);font-size:12px}
+input[type=text],input[type=url],input[type=password],input[type=number],select,textarea{font:inherit;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--surface);color:var(--text);min-height:40px;width:100%}
+label.sw{display:flex;gap:10px;align-items:flex-start;margin-bottom:var(--s-3);font-weight:600;cursor:pointer}
+label.sw input{width:18px;height:18px;margin-top:5px;accent-color:var(--brand-600)}
+label.sw .hint{display:block}
+.grid{display:grid;gap:var(--s-4);grid-template-columns:1fr 1fr}@media(max-width:560px){.grid{grid-template-columns:1fr}}
+.actions{display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:center}
+.btn.danger{border-color:var(--danger);color:var(--danger)}
+.pw{display:flex;gap:var(--s-2)}
+#msg{min-height:1.6em}
+</style></head>
+<body><main>
+<h1>تنظیمات</h1>
+<form id="f" style="display:grid;gap:16px">
+
+<section class="card"><fieldset><legend>اتصال</legend>
+  <label class="f" for="backendUrl">آدرس بک‌اند <span class="hint">مثال: https://analyzer.example.local (فقط https؛ localhost مجاز است)</span>
+    <input id="backendUrl" type="url" dir="ltr" placeholder="https://"></label>
+  <label class="f" for="token">توکن دسترسی <span class="hint">همان API_TOKEN سرور</span>
+    <span class="pw"><input id="token" type="password" dir="ltr" autocomplete="off"><button type="button" class="btn" id="showTok" aria-pressed="false">نمایش</button></span></label>
+  <label class="f" for="panelOrigin">آدرس پنل تلفنی <span class="hint">پیش‌فرض https://192.168.139.15. اگر آدرس پنل شما فرق دارد، اینجا بنویسید؛ مرورگر یک‌بار اجازه‌ی دسترسی می‌پرسد.</span>
+    <input id="panelOrigin" type="url" dir="ltr" placeholder="https://192.168.139.15"></label>
+  <div class="actions"><button type="button" class="btn" id="test">آزمایش اتصال</button><span id="conn" class="note" role="status"></span></div>
+</fieldset></section>
+
+<section class="card"><fieldset><legend>انتخاب تماس‌ها</legend>
+  <div class="grid">
+    <label class="f" for="minSeconds">حداقل مدت مکالمه (ثانیه)<span class="hint">روی مدت واقعی از ریز مکالمات سنجیده می‌شود</span><input id="minSeconds" type="number" min="0" max="600"></label>
+    <label class="f" for="onlyExtensions">فقط این داخلی‌ها<span class="hint">مثال: 14, 33 — خالی یعنی همه</span><input id="onlyExtensions" type="text" dir="ltr" placeholder="14, 33"></label>
+  </div>
+  <label class="sw"><input type="checkbox" id="includeInternal"><span>تحلیل تماس‌های داخلی بین همکاران<span class="hint">پیش‌فرض خاموش؛ این تماس‌ها معمولاً فروش نیستند.</span></span></label>
+</fieldset></section>
+
+<section class="card"><fieldset><legend>تحلیل خودکار و هزینه</legend>
+  <label class="sw"><input type="checkbox" id="autoAnalyze"><span>تحلیل خودکار هنگام باز شدن جدول<span class="hint">تماس‌های واجد شرایطِ تحلیل‌نشده، تا سقف زیر، خودکار به صف می‌روند. هر تحلیل هزینه دارد.</span></span></label>
+  <div class="grid">
+    <label class="f" for="autoLimit">سقف تحلیل خودکار در هر بار<input id="autoLimit" type="number" min="1" max="100"></label>
+    <label class="f" for="confirmBulkOver">پرسش تأیید برای انتخاب بیش از<span class="hint">تعداد تماس</span><input id="confirmBulkOver" type="number" min="1" max="500"></label>
+  </div>
+</fieldset></section>
+
+<section class="card"><fieldset><legend>عملکرد</legend>
+  <div class="grid">
+    <label class="f" for="concurrency">دانلود/آپلود هم‌زمان<input id="concurrency" type="number" min="1" max="5"></label>
+    <label class="f" for="pollSeconds">فاصله‌ی بررسی وضعیت (ثانیه)<input id="pollSeconds" type="number" min="2" max="30"></label>
+  </div>
+</fieldset></section>
+
+<section class="card"><fieldset><legend>ظاهر</legend>
+  <label class="f" for="theme">تم<select id="theme"><option value="auto">خودکار (مطابق سیستم)</option><option value="light">روشن</option><option value="dark">تیره</option></select></label>
+  <label class="sw"><input type="checkbox" id="showScoreInPill"><span>نمایش عدد امتیاز در جدول پنل<span class="hint">اگر خاموش باشد فقط درجه (A تا F) نمایش داده می‌شود.</span></span></label>
+  <label class="f" for="sellersText">نام نمایشی فروشنده‌ها <span class="hint">هر خط «داخلی=نام»، مثلاً 14=سارا. فقط برای نمایش در پنل کناری است؛ نگاشت اصلی در config/sellers.json سرور است.</span>
+    <textarea id="sellersText" rows="4" dir="rtl"></textarea></label>
+</fieldset></section>
+
+<div class="actions"><button class="btn primary" type="submit">ذخیره</button><span id="msg" role="status" class="note"></span></div>
+</form>
+
+<section class="card" style="margin-top:16px"><h2>نگهداری</h2>
+  <div class="actions">
+    <button class="btn" id="export" type="button">خروجی گرفتن از تنظیمات</button>
+    <button class="btn" id="import" type="button">وارد کردن تنظیمات</button><input id="file" type="file" accept="application/json" hidden>
+    <button class="btn" id="clearCdr" type="button">پاک‌کردن حافظه‌ی ریز مکالمات</button>
+    <button class="btn" id="clearJobs" type="button">پاک‌کردن تاریخچه‌ی صف</button>
+    <button class="btn danger" id="reset" type="button">بازنشانی به پیش‌فرض</button>
+  </div>
+  <p class="note" id="stats"></p>
+  <p class="note">توکن در خروجی تنظیمات <b>نمی‌آید</b>.</p>
+</section>
+
+<section class="card" style="margin-top:16px"><h2>درباره</h2>
+  <p class="note">اکستنشن: <span id="ver"></span> · بک‌اند: <span id="bver">—</span> · روبریک: <span id="rver">—</span></p>
+  <p class="note">اگر دانلود از پنل شکست خورد، آدرس پنل را در تب جدید باز کنید و گواهی را بپذیرید.</p></section>
+</main>
+<script src="lib/settings.js"></script><script src="options.js"></script></body></html>

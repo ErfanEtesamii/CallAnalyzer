@@ -1,0 +1,234 @@
+{
+  "rubric_version": "1.0.0",
+  "scale": {
+    "per_criterion": "0-10",
+    "overall": "0-100"
+  },
+  "scoring": {
+    "overall_formula": "sum(weight_i * score_i/10 for applicable criteria) / sum(weight_i for applicable criteria) * 100",
+    "min_applicable_weight_for_reliable_score": 55,
+    "if_below_min_applicable": "امتیاز کل ارائه نشود یا با هشدار «کم‌اعتبار» ارائه شود",
+    "penalties": {
+      "description": "پس از محاسبه‌ی امتیاز نرمال‌شده، در کد اعمال می‌شود (نه توسط مدل).",
+      "high": {
+        "effect": "سقف امتیاز کل = ۵۰ و حداکثر درجه D",
+        "examples": [
+          "توهین/بی‌ادبی شدید",
+          "وعده‌ی دروغ مشخص",
+          "قطع تماس روی مشتری",
+          "تهدید یا فشار شدید"
+        ]
+      },
+      "medium": {
+        "effect": "هر مورد ۵− امتیاز (حداکثر ۱۰−)",
+        "examples": [
+          "بدگویی از رقبا",
+          "تمسخر یا شرمنده‌کردن مشتری",
+          "قضاوت مشتری از روی لهجه/شهر",
+          "ایجاد فوریت دروغین",
+          "انتقال ناراحتی شخصی به مشتری"
+        ]
+      },
+      "low": {
+        "effect": "هر مورد ۲− امتیاز (حداکثر ۶−)",
+        "examples": [
+          "عبارات تردیدآمیز بیش از حد",
+          "نادیده‌گرفتن نام مشتری",
+          "پرسیدن مجدد یک سؤال"
+        ]
+      }
+    },
+    "grades": [
+      {
+        "grade": "A",
+        "min": 85,
+        "label": "عالی"
+      },
+      {
+        "grade": "B",
+        "min": 70,
+        "label": "خوب"
+      },
+      {
+        "grade": "C",
+        "min": 55,
+        "label": "متوسط"
+      },
+      {
+        "grade": "D",
+        "min": 40,
+        "label": "ضعیف"
+      },
+      {
+        "grade": "F",
+        "min": 0,
+        "label": "بسیار ضعیف"
+      }
+    ],
+    "role_confidence_threshold": 0.6,
+    "role_confidence_effect": "اگر role_assignment_confidence کمتر از آستانه بود: criteriaهای وابسته به نقش (active_listening, questioning_technique, rapport_trust) با confidence پایین علامت بخورد و در UI هشدار نمایش داده شود."
+  },
+  "lexicons": {
+    "hedging_words": [
+      "شاید",
+      "فکر کنم",
+      "فکر میکنم",
+      "ممکنه",
+      "ممکن است",
+      "نمیدونم",
+      "نمیدانم",
+      "احتمال داره",
+      "احتمال دارد",
+      "به نظرم"
+    ],
+    "invite_no_patterns": [
+      "یا نه",
+      "نمی‌خواید",
+      "نمیخواید",
+      "دوست ندارید"
+    ],
+    "skip_forward_patterns": [
+      "می‌دونم دقیقاً",
+      "میدونم دقیقا",
+      "فهمیدم مشکلتون چیه"
+    ],
+    "competitor_badmouthing_hints": [
+      "بی‌کیفیت",
+      "کلاهبردار",
+      "دروغ میگن",
+      "افتضاح"
+    ],
+    "note": "این فهرست‌ها فقط راهنمای تشخیص هستند؛ تصمیم نهایی با درک مفهوم جمله است، نه تطبیق ساده‌ی کلمه."
+  },
+  "computed_metrics": [
+    "talk_ratio_seller_vs_customer",
+    "interruption_count_seller_over_customer",
+    "longest_seller_monologue_seconds",
+    "avg_response_latency_after_customer_question",
+    "silence_after_customer_thinking",
+    "speech_rate_wpm_seller",
+    "hedging_word_count",
+    "invite_no_question_count",
+    "name_usage_count",
+    "who_hung_up_last (اگر قابل‌تشخیص)",
+    "seconds_until_greeting_intro_complete",
+    "price_first_mentioned_at"
+  ],
+  "min_analyzable_seller_speech_seconds": 20,
+  "call_type_ids": [
+    "cold_new",
+    "exhibition",
+    "former_customer",
+    "personal_buyer",
+    "follow_up",
+    "other"
+  ],
+  "sales_stage_ids": [
+    "customer_identification",
+    "rapport_trust",
+    "needs_discovery",
+    "presentation",
+    "objection_handling",
+    "closing",
+    "follow_up"
+  ],
+  "customer_stage_ids": [
+    "hot_ready",
+    "warm_followup",
+    "nurturing",
+    "gatekeeper_blocked",
+    "not_now",
+    "lost_competitor",
+    "not_target",
+    "no_conversation"
+  ],
+  "objection_type_ids": [
+    "price",
+    "budget",
+    "competitor",
+    "consult",
+    "think",
+    "not_now",
+    "status_quo",
+    "quality_trust",
+    "no_need"
+  ],
+  "seller_style_ids": [
+    "order_taker",
+    "presenter",
+    "closer"
+  ],
+  "lead_info_fields": [
+    "contact_name",
+    "contact_title",
+    "tenure_in_org",
+    "familiar_with_handicrafts",
+    "occasion(s)",
+    "recipients (staff|customers|both)",
+    "decision_unit_or_person",
+    "other_influencers",
+    "budget_range",
+    "volume",
+    "last_year_gifting",
+    "previous_supplier",
+    "main_challenges",
+    "decision_criteria",
+    "timeline",
+    "preferred_channel",
+    "agreed_next_step",
+    "followup_datetime",
+    "gatekeeper_info"
+  ],
+  "criteria_weights": {
+    "opening_intro": {
+      "weight": 7,
+      "applies_to": "all"
+    },
+    "rapport_trust": {
+      "weight": 8,
+      "applies_to": "all"
+    },
+    "needs_discovery": {
+      "weight": 15,
+      "applies_to": "all"
+    },
+    "active_listening": {
+      "weight": 9,
+      "applies_to": "all"
+    },
+    "questioning_technique": {
+      "weight": 6,
+      "applies_to": "all"
+    },
+    "value_presentation": {
+      "weight": 11,
+      "applies_to": "all"
+    },
+    "objection_handling": {
+      "weight": 13,
+      "applies_to": "all"
+    },
+    "closing_next_step": {
+      "weight": 11,
+      "applies_to": "all"
+    },
+    "followup_quality": {
+      "weight": 5,
+      "applies_to": [
+        "follow_up"
+      ]
+    },
+    "professionalism_ethics": {
+      "weight": 6,
+      "applies_to": "all"
+    },
+    "call_control_structure": {
+      "weight": 5,
+      "applies_to": "all"
+    },
+    "product_market_knowledge": {
+      "weight": 4,
+      "applies_to": "all"
+    }
+  }
+}

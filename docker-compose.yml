@@ -1,0 +1,13 @@
+services:
+  backend:
+    build: {context: ., dockerfile: backend/Dockerfile}
+    env_file: backend/.env
+    volumes: ["./data:/app/backend/data"]
+    restart: unless-stopped
+  caddy:
+    image: caddy:2
+    ports: ["443:443", "80:80"]
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile", "caddy_data:/data"]
+    depends_on: [backend]
+    restart: unless-stopped
+volumes: {caddy_data: {}}
