@@ -32,6 +32,13 @@ def _extract_json(text: str) -> dict:
     return json.loads(t[a:b + 1])  # از { تا } همیشه شیء است؛ خطای سینتکس = ValueError
 
 
+def _api_error(r: httpx.Response) -> str:
+    try:
+        return str((r.json().get("error") or {}).get("message", ""))[:300]
+    except ValueError:
+        return ""
+
+
 class GeminiLLM:
     def __init__(self, api_key: str, *, transport: httpx.AsyncBaseTransport | None = None,
                  thinking_budget: int | None = None, max_retries: int = 3, sleep=asyncio.sleep,
@@ -63,8 +70,9 @@ class GeminiLLM:
                     raise LLMError("llm_auth", "کلید Gemini نامعتبر است (GEMINI_API_KEY).")
                 if r.status_code == 404:
                     raise LLMError("llm_model", f"مدل «{model}» پیدا نشد؛ ANALYSIS_MODEL را بررسی کنید.")
-                log.error("gemini http %s", r.status_code)  # بدون بدنه (ممکن است محتوا داشته باشد)
-                e = LLMError("llm_http", f"خطای Gemini ({r.status_code}).")
+                why = _api_error(r)  # فقط error.message خود Gemini (توضیح فنی، نه محتوای مکالمه)
+                log.error("gemini http %s: %s", r.status_code, why)
+                e = LLMError("llm_http", f"خطای Gemini ({r.status_code})" + (f": {why}" if r.status_code == 400 and why else "."))
                 e.try_next = r.status_code in _RETRY_STATUS
                 raise e
         raise LLMError("llm_http", "خطای Gemini.")

@@ -237,3 +237,15 @@ def test_gemini_stt_fallback_and_labeler_preserves_labels(tmp_path):
     segs = [Segment(0, 2, "سلام", CUSTOMER), Segment(3, 4, "بله")]
     out = run(SpeakerLabeler(None, "m").label(segs))
     assert out[0].speaker == CUSTOMER  # برچسب ارائه‌دهنده بازنویسی نمی‌شود
+
+
+def test_gemini_400_shows_api_reason():
+    import httpx
+    import pytest
+
+    from app.analysis.errors import LLMError
+    from app.analysis.gemini import GeminiLLM
+    t = httpx.MockTransport(lambda r: httpx.Response(400, json={"error": {"message": "Unsupported thinking config"}}))
+    with pytest.raises(LLMError) as ei:
+        run(GeminiLLM("k", transport=t, fallback_models=[])._post("m", {}))
+    assert "Unsupported thinking config" in str(ei.value)
