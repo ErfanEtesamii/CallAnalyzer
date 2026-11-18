@@ -27,6 +27,31 @@ from app.util import hash_phone, hms_to_seconds, mask_phone, parse_filename
 VERSION = "1.0.0"
 
 
+class BatchIn(BaseModel):
+    unique_ids: list[str]
+
+
+class ReIn(BaseModel):
+    seller_speaker: str | None = None
+
+
+class OverrideIn(BaseModel):
+    field: str
+    new: float | str
+    note: str = ""
+
+
+class NoteIn(BaseModel):
+    text: str
+
+
+class FeedbackIn(BaseModel):
+    criterion_id: str
+    agrees: bool
+    manager_score: float | None = None
+    reason: str = ""
+
+
 def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> FastAPI:
     s = settings or Settings.from_env()
     db = DB(s.database_url)
@@ -110,8 +135,6 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
             raise HTTPException(404, "یافت نشد.")
         return a
 
-    class BatchIn(BaseModel):
-        unique_ids: list[str]
 
     @app.post("/api/v1/analyses/batch-status")
     def batch(b: BatchIn, _: str = Depends(auth)):
@@ -147,8 +170,6 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
                 await asyncio.sleep(1)
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    class ReIn(BaseModel):
-        seller_speaker: str | None = None
 
     @app.post("/api/v1/analyses/{aid}/reanalyze", status_code=202)
     async def reanalyze(aid: int, b: ReIn | None = None, user: str = Depends(auth)):
@@ -156,10 +177,6 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
         asyncio.create_task(pipe.reanalyze(aid, b.seller_speaker if b else None))
         return {"id": aid, "status": "analyzing"}
 
-    class OverrideIn(BaseModel):
-        field: str
-        new: float | str
-        note: str = ""
 
     @app.post("/api/v1/analyses/{aid}/override")
     def override(aid: int, b: OverrideIn, user: str = Depends(auth)):
@@ -170,8 +187,6 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
         db.audit(user, "override", aid)
         return {"ok": True}
 
-    class NoteIn(BaseModel):
-        text: str
 
     @app.post("/api/v1/analyses/{aid}/notes")
     def note(aid: int, b: NoteIn, user: str = Depends(auth)):
@@ -179,11 +194,6 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
         db.x("INSERT INTO notes(analysis_id,user,text,created_at) VALUES(?,?,?,strftime('%s','now'))", (aid, user, b.text))
         return {"ok": True}
 
-    class FeedbackIn(BaseModel):
-        criterion_id: str
-        agrees: bool
-        manager_score: float | None = None
-        reason: str = ""
 
     @app.post("/api/v1/analyses/{aid}/feedback")
     def feedback(aid: int, b: FeedbackIn, _: str = Depends(auth)):
@@ -237,6 +247,4 @@ def _lazy_app():
     return create_app()
 
 
-app = None
-if os.environ.get("API_TOKEN"):
-    app = create_app()
+app = create_app()
