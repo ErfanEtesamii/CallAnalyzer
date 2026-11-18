@@ -256,3 +256,12 @@ def test_stt_persistent_5xx_is_friendly_error(tmp_path):
     p = OpenAISTT("k", transport=httpx.MockTransport(lambda r: httpx.Response(524)), sleep=nosleep)
     with pytest.raises(ProviderUnavailable, match="524"):
         asyncio.run(p.transcribe(str(wav)))
+
+def test_interrupted_jobs_failed_on_startup(tmp_path):
+    from app.db import DB
+    d = DB(str(tmp_path / "t.db"))
+    a = d.create_analysis(unique_id="u1", status="transcribing")
+    b = d.create_analysis(unique_id="u2", status="done")
+    assert d.fail_interrupted() == 1
+    assert d.get(a)["status"] == "failed" and d.get(a)["error_code"] == "interrupted"
+    assert d.get(b)["status"] == "done"

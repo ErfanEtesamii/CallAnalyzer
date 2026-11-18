@@ -67,6 +67,16 @@ class DB:
         f["updated_at"] = time.time()
         self.x(f"UPDATE analyses SET {','.join(k + '=?' for k in f)} WHERE id=?", (*f.values(), aid))
 
+    def fail_interrupted(self) -> int:
+        """کارهای نیمه‌کاره‌ی مانده از اجرای قبلی (ری‌استارت/خاموشی) را failed می‌کند تا ابداً گیر نکنند."""
+        with self.lock:
+            cur = self.conn.execute(
+                "UPDATE analyses SET status='failed', error_code='interrupted', error_message=?, updated_at=? "
+                "WHERE status IN ('queued','preprocessing','transcribing','analyzing')",
+                ("پردازش با ری‌استارت سرویس قطع شد. دوباره تلاش کنید.", time.time()))
+            self.conn.commit()
+            return cur.rowcount
+
     def get(self, aid: int) -> dict | None:
         rows = self.q("SELECT * FROM analyses WHERE id=?", (aid,))
         return self._attach(rows[0]) if rows else None

@@ -58,6 +58,7 @@ class FeedbackIn(BaseModel):
 def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> FastAPI:
     s = settings or Settings.from_env()
     db = DB(s.database_url)
+    db.fail_interrupted()  # کارهای مانده از قبل از ری‌استارت
     rubric = load_rubric(s.rubric_dir)
     sellers = json.loads(Path(s.sellers_file).read_text(encoding="utf-8")) if Path(s.sellers_file).exists() else {}
     vocab = Path("domain_vocab.txt").read_text(encoding="utf-8").replace("\n", "، ") if Path("domain_vocab.txt").exists() else ""
