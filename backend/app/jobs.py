@@ -132,7 +132,7 @@ class Pipeline:
 
         if getattr(stt, "supports_live", False):
             tr = await stt.transcribe(proc, language="fa", on_segments=on_segments)
-            tr.diarized = labeler.llm_batches > 0
+            tr.diarized = labeler.llm_batches > 0 or getattr(stt, "labels_speakers", False)
             return tr
         tr = await stt.transcribe(proc, language="fa")
         for s in tr.segments:

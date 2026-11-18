@@ -107,9 +107,9 @@ class SpeakerLabeler:
         if not segs:
             return segs
         for s in segs:  # تلفن گویا با الگوهای قطعی (موسیقی را ارائه‌دهنده‌ی STT قبلاً علامت زده)
-            if s.speaker not in SPECIAL and looks_ivr(s.text):
+            if s.speaker is None and looks_ivr(s.text):
                 s.speaker = IVR
-        todo = [s for s in segs if s.speaker not in SPECIAL]
+        todo = [s for s in segs if s.speaker is None]  # برچسب‌دار از ارائه‌دهنده (Gemini) دست‌نخورده می‌ماند
         if todo:
             labels = None
             if self.llm is not None:

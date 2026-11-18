@@ -172,3 +172,68 @@ def test_metrics_ignore_specials_and_transcript_shows_parentheses():
     assert "(موسیقی)" in txt and "(تلفن گویا: برای فروش عدد ۱)" in txt
     only_music = compute_metrics([Segment(0, 30, "موسیقی", "music")], SELLER, {})
     assert only_music.get("available") is False
+
+
+# ---- Gemini STT (رونویسی + گوینده از روی صدا) ----
+def _gem_resp(turns):
+    import json
+    return {"candidates": [{"content": {"parts": [{"text": json.dumps({"turns": turns}, ensure_ascii=False)}]}}]}
+
+
+def test_turns_to_segments_clamps_and_orders():
+    from app.stt.providers.gemini_provider import turns_to_segments
+    out = turns_to_segments([{"speaker": "seller", "start": 0, "end": 3, "text": "سلام"},
+                             {"speaker": "customer", "start": 2, "end": 0, "text": "بله"},  # شروع قبل از پایان قبلی، پایان نامعتبر
+                             {"speaker": "robot", "start": 5, "end": 6, "text": "x"},  # گوینده نامعتبر حذف
+                             {"speaker": "music", "start": 6, "end": 9, "text": ""}], 100.0, 10.0)
+    assert [(s.speaker, s.text) for s in out] == [("seller", "سلام"), ("customer", "بله"), ("music", "موسیقی")]
+    assert all(b.start >= a.end - 1e-9 for a, b in zip(out, out[1:])) and out[0].start == 100.0 and out[-1].end <= 110.5
+
+
+def test_gemini_stt_chunks_context_and_labels(tmp_path):
+    import json
+
+    import httpx
+
+    from app.stt.providers.gemini_provider import GeminiSTT
+    wav = tmp_path / "a.wav"
+    _tone(wav, 100, 0.5)
+    bodies = []
+
+    def handler(req):
+        bodies.append(json.loads(req.content))
+        n = len(bodies)
+        return httpx.Response(200, json=_gem_resp([{"speaker": "seller", "start": 0, "end": 4, "text": f"سلام {n}"},
+                                                   {"speaker": "customer", "start": 4, "end": 6, "text": f"بله {n}"}]))
+
+    got = []
+
+    async def cb(part):
+        got.append(part)
+
+    p = GeminiSTT("k", transport=httpx.MockTransport(handler), chunk_seconds=45, compress_bitrate="")
+    tr = run(p.transcribe(str(wav), on_segments=cb))
+    assert len(bodies) >= 2 and len(got) == len(bodies) and tr.provider == "gemini"
+    assert "(شروع تماس)" in bodies[0]["contents"][0]["parts"][1]["text"]
+    assert "مشتری: بله 1" in bodies[1]["contents"][0]["parts"][1]["text"]  # زمینه‌ی تکه‌ی قبل
+    assert tr.segments[2].start >= 40 and tr.segments[0].speaker == "seller"
+
+
+def test_gemini_stt_fallback_and_labeler_preserves_labels(tmp_path):
+    import httpx
+
+    from app.stt.base import Transcript
+    from app.stt.providers.gemini_provider import GeminiSTT
+    wav = tmp_path / "a.wav"
+    _tone(wav, 30, 0.5)
+
+    class FB:
+        async def transcribe(self, path, language="fa"):
+            return Transcript([Segment(0, 2, "سلام")], "fa", "groq")
+
+    p = GeminiSTT("k", transport=httpx.MockTransport(lambda r: httpx.Response(400, text="bad")), fallback=FB(), compress_bitrate="")
+    tr = run(p.transcribe(str(wav)))
+    assert [(s.text, s.speaker) for s in tr.segments] == [("سلام", None)]  # بعداً SpeakerLabeler برچسب می‌زند
+    segs = [Segment(0, 2, "سلام", CUSTOMER), Segment(3, 4, "بله")]
+    out = run(SpeakerLabeler(None, "m").label(segs))
+    assert out[0].speaker == CUSTOMER  # برچسب ارائه‌دهنده بازنویسی نمی‌شود

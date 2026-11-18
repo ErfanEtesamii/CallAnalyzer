@@ -16,6 +16,12 @@ def build_provider(settings: Settings, name: str | None = None, vocab_prompt: st
         from app.stt.providers.openai_provider import OpenAISTT
         return OpenAISTT(settings.groq_api_key, model=settings.stt_model or "whisper-large-v3", prompt=vocab_prompt,
                          base_url="https://api.groq.com/openai/v1", name="groq", key_name="GROQ_API_KEY", max_prompt_chars=600)
+    if name == "gemini":  # رونویسی + تفکیک گوینده روی خود صدا؛ اگر GROQ_API_KEY باشد، برای تکه‌های ناموفق جایگزین است
+        import os
+        from app.stt.providers.gemini_provider import GeminiSTT
+        fb = build_provider(settings, "groq", vocab_prompt) if settings.groq_api_key else None
+        return GeminiSTT(settings.gemini_api_key, model=settings.stt_model or os.environ.get("GEMINI_STT_MODEL", "gemini-3.8-flash"),
+                         vocab=vocab_prompt, fallback=fb, chunk_seconds=int(os.environ.get("GEMINI_STT_CHUNK", "45")))
     if name in {"faster_whisper", "faster-whisper"}:
         from app.stt.providers.faster_whisper_provider import FasterWhisperSTT
         return FasterWhisperSTT(initial_prompt=vocab_prompt)
