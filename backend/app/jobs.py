@@ -18,6 +18,7 @@ from app.config import Settings
 from app.db import DB
 from app.live import CUSTOMER, SELLER, LiveStore, SpeakerLabeler, label_model
 from app.stt.base import ProviderUnavailable, Segment, Transcript
+from app.stt.nonspeech import SPECIAL
 from app.util import normalize_fa_text
 
 log = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ def guess_roles(segments: list[Segment]) -> str | None:
     if any(s.speaker == SELLER for s in segments):  # برچسب‌های چت زنده
         return SELLER
     for s in segments:
-        if s.speaker:
+        if s.speaker and s.speaker not in SPECIAL:
             return s.speaker
     return None
 
@@ -94,7 +95,7 @@ class Pipeline:
             self.db.save_transcript(aid, tr.provider, tr.to_json(), {"speech_ratio": info.speech_ratio, "rms": info.rms})
             self.db.log_usage(aid, "stt", tr.provider, secs=info.duration, cost=0.0 if self.settings.stt_provider == "groq" else info.duration / 60 * COST["stt_per_min"])
             text = " ".join(s.text for s in tr.segments)
-            if pp.looks_like_voicemail(info.duration, len({s.speaker for s in tr.segments if s.speaker}), text):
+            if pp.looks_like_voicemail(info.duration, len({s.speaker for s in tr.segments if s.speaker and s.speaker not in SPECIAL}), text):
                 self._close_no_conversation(aid, "پیغام‌گیر/صندوق صوتی تشخیص داده شد.")
                 return
             await self.analyze_transcript(aid, tr)
@@ -164,7 +165,7 @@ class Pipeline:
         meta = {"call_datetime": a["call_datetime"], "duration_seconds": a["real_duration"], "direction": a["direction"],
                 "seller_name": a["seller_name"]}
         out = await asyncio.wait_for(self.analyzer.analyze(tr, meta, seller_speaker=seller), STAGE_TIMEOUT["analyzing"])
-        sps = {x.speaker for x in tr.segments if x.speaker}
+        sps = {x.speaker for x in tr.segments if x.speaker and x.speaker not in SPECIAL}
         if seller in sps:  # گوینده‌ها را خودمان برچسب زده‌ایم؛ نقش‌ها را مدل نمی‌تواند خلاف آن گزارش کند
             p = out.result.setdefault("participants", {})
             p["seller_speaker"], p["customer_speaker"] = seller, next((x for x in sorted(sps) if x != seller), None)

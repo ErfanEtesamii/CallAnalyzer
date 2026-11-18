@@ -298,3 +298,15 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px 6px;b
 .lv-clock{direction:ltr;unicode-bidi:isolate;padding:0 8px;border-radius:var(--r-pill);background:var(--surface-2)}
 .lv-jump{position:fixed;inset-inline:0;bottom:84px;margin-inline:auto;width:max-content;z-index:35;display:inline-flex;align-items:center;gap:6px;border:0;border-radius:var(--r-pill);padding:7px 16px 7px 12px;background:var(--ink);color:#fff;box-shadow:var(--shadow-2);font-size:13px;animation:pop .3s var(--ease)}
 .lv-jump[hidden]{display:none}
+
+/* موسیقی و تلفن گویا: برچسب وسط چت «(موسیقی)» */
+.sys{justify-self:center;display:grid;justify-items:center;gap:5px;max-width:92%}
+.sys .tag{display:inline-flex;align-items:center;gap:7px;padding:3px 14px;border-radius:999px;border:1px dashed currentColor;opacity:.8;font-size:12.5px;line-height:1.7}
+.sys.ivr .tag{color:var(--accent-700,#8a6a1f)}
+.sys-tx{display:grid;gap:2px;font-size:12px;opacity:.7;text-align:center;line-height:1.8;padding-inline:12px}
+.sys-tx:empty{display:none}.sys-tx .ln{margin:0}
+.eq{display:inline-flex;align-items:flex-end;gap:2px;height:13px}
+.eq i{display:block;width:3px;height:4px;border-radius:2px;background:currentColor;animation:eq 1s ease-in-out infinite}
+.eq i:nth-child(2){animation-delay:.15s}.eq i:nth-child(3){animation-delay:.3s}.eq i:nth-child(4){animation-delay:.45s}
+@keyframes eq{0%,100%{height:3px}50%{height:13px}}
+.strip .seg.n{background:rgba(128,128,128,.25)}

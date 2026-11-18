@@ -13,7 +13,9 @@
   }
 
   /** نوبت‌های پشت‌سرهم یک گوینده در یک «دسته» (مثل پیام‌های پشت‌سرهم در چت). */
-  const spOf = (s) => (s.speaker === CUSTOMER ? CUSTOMER : SELLER); // برچسب ناشناخته = کارشناس
+  const SPECIAL = { music: 'موسیقی', ivr: 'تلفن گویا' };
+  const isSpecial = (s) => !!s && s.speaker in SPECIAL;
+  const spOf = (s) => (isSpecial(s) ? s.speaker : s.speaker === CUSTOMER ? CUSTOMER : SELLER); // برچسب ناشناخته = کارشناس
   /** آیا قطعه به دسته‌ی قبلی (همان گوینده و بدون وقفه‌ی طولانی) می‌چسبد؟ */
   const joinsRun = (run, s, gapSec = 6) => !!run && run.speaker === spOf(s) && s.start - run.end <= gapSec;
 
@@ -36,12 +38,15 @@
   }
 
   /** حباب «در حال شنیدن…» سمت چه کسی بیاید: نوبت احتمالی بعدی (مخالف آخرین گوینده). */
-  const nextSide = (segs) => (segs.length && segs[segs.length - 1].speaker === SELLER ? CUSTOMER : SELLER);
+  const nextSide = (segs) => {
+    const human = segs.filter((x) => !isSpecial(x)); // موسیقی/تلفن گویا نوبت گفتگو را عوض نمی‌کند
+    return human.length && human[human.length - 1].speaker === SELLER ? CUSTOMER : SELLER;
+  };
 
   /** سرعت تایپ‌شدن حباب تازه (حرف بر ثانیه)؛ کل نمایش از maxMs بیشتر نمی‌شود. */
   const revealMs = (len, cps = 55, maxMs = 1400) => Math.min(maxMs, Math.max(250, (len / cps) * 1000));
 
-  const api = { SELLER, CUSTOMER, merge, groupRuns, joinsRun, spOf, stageIndex, nextSide, revealMs };
+  const api = { SELLER, CUSTOMER, SPECIAL, isSpecial, merge, groupRuns, joinsRun, spOf, stageIndex, nextSide, revealMs };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.CALive = api;
 })(typeof self !== 'undefined' ? self : globalThis);

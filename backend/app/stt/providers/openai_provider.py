@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 import httpx
 
 from app.stt.base import ProviderUnavailable, Segment, Transcript
+from app.stt.nonspeech import LABEL_FA, MUSIC, is_music
 
 log = logging.getLogger(__name__)
 
@@ -83,8 +84,7 @@ class OpenAISTT:
                     os.unlink(small)
                 if is_tmp:
                     os.unlink(chunk_path)
-            part = [Segment(s["start"] + offset, s["end"] + offset, s["text"].strip()) for s in j.get("segments", [])
-                    if s.get("text", "").strip()]
+            part = [_to_segment(s, offset) for s in j.get("segments", []) if str(s.get("text", "")).strip()]
             if not part and j.get("text", "").strip():
                 part = [Segment(offset, offset + float(j.get("duration", 0)), j["text"].strip())]
             segs.extend(part)
@@ -124,6 +124,14 @@ class OpenAISTT:
             if attempt < self.max_retries - 1:
                 await self.sleep(2 * 2 ** attempt)
         raise ProviderUnavailable(last + "؛ دوباره تلاش کنید.")
+
+
+def _to_segment(s: dict, offset: float) -> Segment:
+    """موسیقی/نویز (no_speech_prob بالا، نت موسیقی، توهم زیرنویس) با برچسب music و متن «موسیقی» ثبت می‌شود."""
+    seg = Segment(s["start"] + offset, s["end"] + offset, str(s.get("text", "")).strip())
+    if is_music(s):
+        seg.speaker, seg.text = MUSIC, LABEL_FA[MUSIC]
+    return seg
 
 
 def _quietest_frame(samples: array.array, lo: int, hi: int, frame: int, target: int) -> int:

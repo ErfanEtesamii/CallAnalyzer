@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 
 from app.stt.base import Segment
+from app.stt.nonspeech import IVR, LABEL_FA, SPECIAL
 from app.util import mmss
 
 
@@ -16,6 +17,7 @@ def _count(patterns: list[str], text: str) -> int:
 
 
 def compute_metrics(segments: list[Segment], seller: str | None, lex: dict, customer_name: str | None = None) -> dict:
+    segments = [s for s in segments if s.speaker not in SPECIAL]  # موسیقی/تلفن گویا گفتگوی انسانی نیست
     if not seller or not any(s.speaker for s in segments):
         return {"available": False, "reason": "تفکیک گوینده در دسترس نیست"}
     sel = [s for s in segments if s.speaker == seller]
@@ -64,6 +66,10 @@ def format_transcript(segments: list[Segment], roles: dict[str, str] | None = No
     roles = roles or {}
     out = []
     for s in segments:
+        if s.speaker in SPECIAL:  # مثل چت: «(موسیقی)» و «(تلفن گویا: متن پیام)»
+            tag = LABEL_FA[s.speaker]
+            out.append(f"[{mmss(s.start)}] ({tag}: {s.text})" if s.speaker == IVR else f"[{mmss(s.start)}] ({tag})")
+            continue
         who = roles.get(s.speaker or "", s.speaker or "گوینده")
         out.append(f"[{mmss(s.start)}] {who}: {s.text}")
     return "\n".join(out)

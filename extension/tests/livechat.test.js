@@ -46,3 +46,11 @@ test('joinsRun', () => {
   assert.ok(!L.joinsRun(run, seg(1, 'seller', 20)));
   assert.ok(!L.joinsRun(null, seg(1, 'seller', 1)));
 });
+
+test('موسیقی و تلفن گویا: خاص‌اند و نوبت گفتگو را عوض نمی‌کنند', () => {
+  const L = require('../src/lib/livechat.js');
+  assert.ok(L.isSpecial({ speaker: 'music' }) && L.isSpecial({ speaker: 'ivr' }) && !L.isSpecial({ speaker: 'seller' }));
+  assert.equal(L.spOf({ speaker: 'music' }), 'music');
+  assert.equal(L.nextSide([{ speaker: 'seller' }, { speaker: 'music' }]), 'customer');
+  assert.equal(L.nextSide([{ speaker: 'music' }]), 'seller');
+});

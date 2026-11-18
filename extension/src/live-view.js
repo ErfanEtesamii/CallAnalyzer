@@ -46,6 +46,16 @@ const LiveView = (() => {
     return { row, bub };
   }
 
+  /** «(موسیقی)» / «(تلفن گویا)» به‌صورت برچسب وسط چت؛ برای تلفن گویا متن پیام هم زیرش می‌آید. */
+  function sysNote(sg) {
+    const row = el('div', 'sys ' + sg.speaker); const tag = el('span', 'tag');
+    if (sg.speaker === 'music') { const eq = el('span', 'eq', null, { 'aria-hidden': 'true' }); for (let i = 0; i < 4; i++) eq.append(el('i')); tag.append(eq); }
+    else tag.append(icon('phone'));
+    tag.append(document.createTextNode('(' + L.SPECIAL[sg.speaker] + ')'));
+    const body = el('div', 'sys-tx'); row.append(tag, body);
+    return { row, body };
+  }
+
   function typeInto(node, text) {
     if (reduceMotion) { node.textContent = text; return; }
     const words = text.split(' '); const dur = L.revealMs(text.length); const t0 = performance.now();
@@ -64,6 +74,11 @@ const LiveView = (() => {
     const stick = nearBottom() || !S.segs.length;
     S.typing.remove();
     for (const sg of list) {
+      if (L.isSpecial(sg)) { // موسیقی/تلفن گویا: برچسب وسط چت، پشت‌سرهم‌ها یکی می‌شوند
+        if (L.joinsRun(S.run, sg, 20)) { S.run.end = sg.end; if (sg.speaker === 'ivr') { const p = el('p', 'ln'); S.run.bub.append(p); typeInto(p, sg.text); } }
+        else { const n = sysNote(sg); S.chat.append(n.row); if (sg.speaker === 'ivr') { const p = el('p', 'ln'); n.body.append(p); typeInto(p, sg.text); } S.run = { speaker: sg.speaker, end: sg.end, bub: n.body }; }
+        S.segs.push(sg); continue;
+      }
       if (L.joinsRun(S.run, sg)) {
         const p = el('p', 'ln'); S.run.bub.append(p); typeInto(p, sg.text); S.run.end = sg.end;
       } else {
@@ -157,5 +172,5 @@ const LiveView = (() => {
 
   addEventListener('scroll', () => { if (S && nearBottom()) S.ui.jump.hidden = true; }, { passive: true });
   const isShowing = (uid) => !!(S && S.uid === uid && S.ui.root.isConnected);
-  return { show, stop, isShowing };
+  return { show, stop, isShowing, sysNote };
 })();

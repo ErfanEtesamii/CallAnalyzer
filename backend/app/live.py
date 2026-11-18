@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from app.stt.base import Segment
+from app.stt.nonspeech import IVR, MUSIC, SPECIAL, looks_ivr
 
 log = logging.getLogger(__name__)
 
@@ -60,11 +61,13 @@ _SYSTEM = (
     "کاتالوگ و قیمت و قدم بعدی را مطرح می‌کند. «مشتری» (customer) پاسخ می‌دهد، می‌پرسد یا اعتراض می‌کند. "
     "به هر قطعه‌ی شماره‌دار دقیقاً یک برچسب بده: seller یا customer. متن را عوض نکن. "
     "از ادامه‌ی گفتگوی قبلی (با برچسب‌های قطعی) و محتوا و نوبت‌ها استفاده کن؛ معمولاً گوینده‌ها نوبتی عوض می‌شوند. "
+    "اگر قطعه پیام ضبط‌شده‌ی تلفن گویا/منوی صوتی/صندوق صوتی (مثل «برای ... عدد ۱ را فشار دهید»، «مشترک در دسترس نیست»، خوش‌آمدگویی خودکار) است برچسب ivr بده؛ "
+    "اگر متن بی‌معنی/تکراری ناشی از موسیقی انتظار یا نویز است برچسب music. گفتگوی واقعی دو انسان هرگز ivr یا music نیست. "
     "تنها خروجی: یک شیء JSON با کلید labels (آرایه‌ای هم‌طول با قطعه‌های جدید)."
 )
 _TOOL = {"name": "label_speakers", "description": "برچسب گوینده برای هر قطعه",
          "input_schema": {"type": "object", "required": ["labels"],
-                          "properties": {"labels": {"type": "array", "items": {"type": "string", "enum": [SELLER, CUSTOMER]}}}}}
+                          "properties": {"labels": {"type": "array", "items": {"type": "string", "enum": [SELLER, CUSTOMER, IVR, MUSIC]}}}}}
 
 
 def heuristic_labels(segs: list[Segment], prev_last: Segment | None, prev_speaker: str | None) -> list[str]:
@@ -84,6 +87,14 @@ def heuristic_labels(segs: list[Segment], prev_last: Segment | None, prev_speake
     return out
 
 
+_ALLOWED = (SELLER, CUSTOMER, IVR, MUSIC)
+
+
+def _ctx_line(s: Segment) -> str:
+    who = {SELLER: "کارشناس", CUSTOMER: "مشتری", IVR: "(تلفن گویا)", MUSIC: "(موسیقی)"}.get(s.speaker or "", "مشتری")
+    return f"{who}: {s.text}"
+
+
 class SpeakerLabeler:
     """برچسب‌زنی تدریجی هر تکه با یک مدل سبک؛ در صورت هر مشکل به heuristic برمی‌گردد."""
 
@@ -95,24 +106,30 @@ class SpeakerLabeler:
     async def label(self, segs: list[Segment]) -> list[Segment]:
         if not segs:
             return segs
-        labels = None
-        if self.llm is not None:
-            try:
-                labels = await self._ask(segs)
-                if labels and len(labels) == len(segs) and all(x in (SELLER, CUSTOMER) for x in labels):
-                    self.llm_batches += 1
-            except Exception as e:  # noqa: BLE001 — برچسب‌زنی هرگز پایپ‌لاین را نمی‌شکند
-                log.warning("speaker labeling failed (%s); using heuristic", type(e).__name__)
-        if not labels or len(labels) != len(segs) or any(x not in (SELLER, CUSTOMER) for x in labels):
-            last = self.history[-1] if self.history else None
-            labels = heuristic_labels(segs, last, last.speaker if last else None)
-        for s, sp in zip(segs, labels, strict=True):
-            s.speaker = sp
+        for s in segs:  # تلفن گویا با الگوهای قطعی (موسیقی را ارائه‌دهنده‌ی STT قبلاً علامت زده)
+            if s.speaker not in SPECIAL and looks_ivr(s.text):
+                s.speaker = IVR
+        todo = [s for s in segs if s.speaker not in SPECIAL]
+        if todo:
+            labels = None
+            if self.llm is not None:
+                try:
+                    labels = await self._ask(todo)
+                    if labels and len(labels) == len(todo) and all(x in _ALLOWED for x in labels):
+                        self.llm_batches += 1
+                except Exception as e:  # noqa: BLE001 — برچسب‌زنی هرگز پایپ‌لاین را نمی‌شکند
+                    log.warning("speaker labeling failed (%s); using heuristic", type(e).__name__)
+            if not labels or len(labels) != len(todo) or any(x not in _ALLOWED for x in labels):
+                human = [x for x in self.history if x.speaker not in SPECIAL]
+                last = human[-1] if human else None
+                labels = heuristic_labels(todo, last, last.speaker if last else None)
+            for s, sp in zip(todo, labels, strict=True):
+                s.speaker = sp
         self.history.extend(segs)
         return segs
 
     async def _ask(self, segs: list[Segment]) -> list[str] | None:
-        ctx = "\n".join(f"{'کارشناس' if s.speaker == SELLER else 'مشتری'}: {s.text}" for s in self.history[-self.context_lines:])
+        ctx = "\n".join(_ctx_line(s) for s in self.history[-self.context_lines:])
         new = "\n".join(f"{i + 1}. {s.text}" for i, s in enumerate(segs))
         user = (f"<گفتگوی_قبلی>\n{ctx or '(شروع تماس)'}\n</گفتگوی_قبلی>\n<قطعه‌های_جدید>\n{new}\n</قطعه‌های_جدید>\n"
                 f"فقط {len(segs)} برچسب برگردان.")

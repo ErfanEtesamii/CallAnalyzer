@@ -16,6 +16,7 @@ const api = (path, init) => call('API', { path, init });
 
 /* ---------- آیکون‌ها (مسیرهای ثابت) ---------- */
 const ICONS = {
+  music: ['M9 18V5l11-2v13', 'M9 18a3 3 0 1 1-3-3 3 3 0 0 1 3 3z', 'M20 16a3 3 0 1 1-3-3 3 3 0 0 1 3 3z'],
   analysis: ['M4 19V5', 'M4 19h16', 'M8 15l3-4 3 2 4-6'],
   queue: ['M9 6h11', 'M9 12h11', 'M9 18h11', 'M4.5 6h.01', 'M4.5 12h.01', 'M4.5 18h.01'],
   history: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2'],
@@ -104,7 +105,7 @@ function callStrip(a, r, jump) {
   const strip = el('div', 'strip', null, { role: 'group', 'aria-label': 'نوار زمانی تماس' });
   const track = el('div', 'track');
   segs.forEach((s) => {
-    const d = el('div', 'seg ' + (s.speaker === seller || !s.speaker ? 's' : 'c'));
+    const d = el('div', 'seg ' + (CALive.isSpecial(s) ? 'n' : s.speaker === seller || !s.speaker ? 's' : 'c'));
     d.style.insetInlineStart = (s.start / total * 100) + '%'; d.style.width = Math.max(0.4, (s.end - s.start) / total * 100) + '%';
     track.append(d);
   });
@@ -258,7 +259,7 @@ function renderAnalysis(a, audio) {
     const box = el('div', 'panel tr-wrap'); box.hidden = true; trBox = box;
     if (audio) box.append(audio);
     const bw = el('div', 'bubbles');
-    tr.segments.forEach((s) => { const b = el('button', 'b ' + (s.speaker === seller || !s.speaker ? 's' : 'c')); b.append(el('small', null, mmss(s.start) + (s.speaker === seller ? ' فروشنده' : s.speaker ? ' مشتری' : '')), document.createTextNode(s.text)); b.onclick = () => jump(s.start); bubbles.push({ t: s.start, e: b }); bw.append(b); });
+    tr.segments.forEach((s) => { if (CALive.isSpecial(s)) { const n = LiveView.sysNote(s); if (s.speaker === 'ivr') n.body.append(el('p', 'ln', s.text)); bubbles.push({ t: s.start, e: n.row }); bw.append(n.row); return; } const b = el('button', 'b ' + (s.speaker === seller || !s.speaker ? 's' : 'c')); b.append(el('small', null, mmss(s.start) + (s.speaker === seller ? ' فروشنده' : s.speaker ? ' مشتری' : '')), document.createTextNode(s.text)); b.onclick = () => jump(s.start); bubbles.push({ t: s.start, e: b }); bw.append(b); });
     box.append(bw);
     const tg = el('button', 'link', 'نمایش ترنسکریپت'); trOpen = (open) => { box.hidden = !open; tg.textContent = open ? 'پنهان‌کردن' : 'نمایش ترنسکریپت'; };
     tg.onclick = () => trOpen(box.hidden);

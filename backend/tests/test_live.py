@@ -129,3 +129,46 @@ def test_live_endpoint(tmp_path):
     j = c.get(f"/api/v1/analyses/{aid}/live", headers=h).json()
     assert j["status"] == "transcribing" and j["next"] == 2 and [x["speaker"] for x in j["segments"]] == [SELLER, CUSTOMER]
     assert c.get(f"/api/v1/analyses/{aid}/live?after=2", headers=h).json()["segments"] == []
+
+
+# ---- موسیقی و تلفن گویا ----
+def test_nonspeech_detection():
+    from app.stt.nonspeech import is_music, looks_ivr
+    assert is_music({"text": "♪♪"}) and is_music({"text": "موسیقی"}) and is_music({"text": "ترجمه و زیرنویس توسط علی"})
+    assert is_music({"text": "ممنون", "no_speech_prob": 0.9, "avg_logprob": -1.2})
+    assert not is_music({"text": "سلام وقت بخیر", "no_speech_prob": 0.05, "avg_logprob": -0.2})
+    assert not is_music({"text": "ممنون", "no_speech_prob": 0.9, "avg_logprob": -0.3})  # گفتار واقعی با احتمال سکوت بالا ولی مطمئن
+    assert looks_ivr("برای ارتباط با فروش عدد یک را فشار دهید") and looks_ivr("مشترک مورد نظر در دسترس نیست")
+    assert not looks_ivr("سلام وقت بخیر از فراز هنر تماس می‌گیرم")
+
+
+def test_provider_marks_music_segments(tmp_path):
+    import httpx
+
+    from app.stt.providers.openai_provider import OpenAISTT
+    wav = tmp_path / "a.wav"
+    _tone(wav, 3, 0.5)
+    segs = [{"start": 0, "end": 3, "text": "♪", "no_speech_prob": 0.1, "avg_logprob": -0.2},
+            {"start": 3, "end": 5, "text": "سلام", "no_speech_prob": 0.01, "avg_logprob": -0.1}]
+    p = OpenAISTT("k", transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"segments": segs})), compress_bitrate="")
+    tr = run(p.transcribe(str(wav)))
+    assert [(s.speaker, s.text) for s in tr.segments] == [("music", "موسیقی"), (None, "سلام")]
+
+
+def test_labeler_keeps_specials_and_ivr_regex_without_llm():
+    segs = [Segment(0, 3, "موسیقی", "music"), Segment(3, 8, "برای ارتباط با فروش عدد ۱ را فشار دهید"),
+            Segment(9, 11, "سلام وقت بخیر از فراز هنر"), Segment(12, 13, "بله بفرمایید")]
+    out = run(SpeakerLabeler(None, "m").label(segs))
+    assert [s.speaker for s in out] == ["music", "ivr", SELLER, CUSTOMER]
+
+
+def test_metrics_ignore_specials_and_transcript_shows_parentheses():
+    from app.analysis.metrics import compute_metrics, format_transcript
+    segs = [Segment(0, 30, "موسیقی", "music"), Segment(30, 34, "سلام", SELLER), Segment(34, 36, "بله", CUSTOMER),
+            Segment(36, 40, "برای فروش عدد ۱", "ivr")]
+    m = compute_metrics(segs, SELLER, {})
+    assert m.get("available", True) is not False
+    txt = format_transcript(segs)
+    assert "(موسیقی)" in txt and "(تلفن گویا: برای فروش عدد ۱)" in txt
+    only_music = compute_metrics([Segment(0, 30, "موسیقی", "music")], SELLER, {})
+    assert only_music.get("available") is False
