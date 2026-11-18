@@ -24,6 +24,7 @@ from app.config import Settings
 from app.db import DB
 from app.ext_dist import BundleCache, make_zip
 from app.jobs import Pipeline
+from app.live import add_routes as add_live_routes
 from app.stt.registry import build_provider
 from app.util import hash_phone, hms_to_seconds, mask_phone, parse_filename
 
@@ -88,12 +89,6 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
         except FileNotFoundError:
             raise HTTPException(404, "پوشه‌ی extension روی سرور پیدا نشد (EXTENSION_DIR).")
 
-    def _ext_bundle():
-        try:
-            return ext_cache.get()
-        except FileNotFoundError:
-            raise HTTPException(404, "پوشه‌ی extension روی سرور پیدا نشد (EXTENSION_DIR).")
-
     @app.get("/api/v1/version")
     def version(_: str = Depends(auth)):
         try:
@@ -128,9 +123,8 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
         if pipe.analyzer is None:
             raise HTTPException(503, "کلید مدل تحلیل روی سرور تنظیم نشده است (ANTHROPIC_API_KEY یا GEMINI_API_KEY).")
         ex = db.get_by_uid(unique_id)
-        
         live = unique_id in pipe.inflight and not pipe.inflight[unique_id].done()
-        # فقط کار تمام‌شده یا کاری که واقعاً در حال اجراست «موجود» حساب می‌شود؛ کار نیمه‌کاره‌ی بی‌پردازنده دوباره اجرا می‌شود.
+        # فقط کار تمام‌شده یا کاری که واقعاً در حال اجراست «موجود» حساب می‌شود؛ کار نیمه‌کاره‌ی بی‌پردازنده (مثلاً پس از ری‌استارت) دوباره اجرا می‌شود.
         if ex and not force and (ex["status"] == "done" or live):
             return {"id": ex["id"], "status": ex["status"], "existing": True}
         if live:
@@ -285,6 +279,7 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
         db.audit(user, "rubric_reload", None)
         return {"version": r.version}
 
+    add_live_routes(app, pipe, auth, _owned)  # چت زنده (رونویسی تدریجی)
     return app
 
 

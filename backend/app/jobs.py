@@ -16,6 +16,7 @@ from app.analysis.scoring import percentile_rank
 from app.audio import preprocess as pp
 from app.config import Settings
 from app.db import DB
+from app.live import CUSTOMER, SELLER, LiveStore, SpeakerLabeler, label_model
 from app.stt.base import ProviderUnavailable, Segment, Transcript
 from app.util import normalize_fa_text
 
@@ -40,6 +41,8 @@ def estimate_llm_cost(tin: int, tout: int) -> float:
 
 def guess_roles(segments: list[Segment]) -> str | None:
     """گوینده‌ی اول را فروشنده فرض می‌کنیم (تماس خروجی)؛ نهایی‌سازی با Claude/اصلاح دستی."""
+    if any(s.speaker == SELLER for s in segments):  # برچسب‌های چت زنده
+        return SELLER
     for s in segments:
         if s.speaker:
             return s.speaker
@@ -55,6 +58,10 @@ class Pipeline:
     sellers: dict = field(default_factory=dict)
     events: dict[int, list[Callable[[str], None]]] = field(default_factory=dict)
     inflight: dict[str, asyncio.Task] = field(default_factory=dict)
+    live: LiveStore = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.live = LiveStore(self.db)
 
     def emit(self, aid: int, status: str) -> None:
         for cb in self.events.get(aid, []):
@@ -80,7 +87,7 @@ class Pipeline:
                 self._close_no_conversation(aid, "نسبت گفتار بسیار کم است (احتمالاً بوق/سکوت/پیغام‌گیر).")
                 return
             self.set_status(aid, "transcribing")
-            tr = await asyncio.wait_for(self.stt_factory().transcribe(proc, language="fa"), STAGE_TIMEOUT["transcribing"])
+            tr = await asyncio.wait_for(self._transcribe_live(aid, proc), STAGE_TIMEOUT["transcribing"])
             for s in tr.segments:
                 s.text = normalize_fa_text(s.text)
             tr.segments = [s for s in tr.segments if s.text]
@@ -107,6 +114,41 @@ class Pipeline:
         finally:
             self._cleanup_audio(aid, raw_path)
 
+    async def _transcribe_live(self, aid: int, proc: str) -> Transcript:
+        """رونویسی با انتشار تدریجی حباب‌های چت (کارشناس/مشتری). خطای برچسب‌زنی هرگز کار را نمی‌شکند."""
+        self.live.reset(aid)
+        stt = self.stt_factory()
+        llm = getattr(self.analyzer, "llm", None) if self.analyzer else None
+        labeler = SpeakerLabeler(llm, label_model(self.settings))
+
+        async def on_segments(part: list[Segment]) -> None:
+            for s in part:
+                s.text = normalize_fa_text(s.text)
+            part[:] = [s for s in part if s.text]
+            if part:
+                await labeler.label(part)
+                self.live.append(aid, part)
+
+        if getattr(stt, "supports_live", False):
+            tr = await stt.transcribe(proc, language="fa", on_segments=on_segments)
+            tr.diarized = labeler.llm_batches > 0
+            return tr
+        tr = await stt.transcribe(proc, language="fa")
+        for s in tr.segments:
+            s.text = normalize_fa_text(s.text)
+        tr.segments = [s for s in tr.segments if s.text]
+        if tr.diarized and any(s.speaker for s in tr.segments):  # ارائه‌دهنده خودش گوینده را تشخیص داده
+            first = next(s.speaker for s in tr.segments if s.speaker)
+            for s in tr.segments:
+                s.speaker = SELLER if s.speaker == first else CUSTOMER
+            self.live.append(aid, tr.segments)
+        else:
+            for i in range(0, len(tr.segments), 12):
+                await labeler.label(tr.segments[i:i + 12])
+            self.live.append(aid, tr.segments)
+            tr.diarized = labeler.llm_batches > 0
+        return tr
+
     def _close_no_conversation(self, aid: int, reason: str) -> None:
         res = {"schema_version": "1.0", "rubric_version": self.analyzer.rubric.version,
                "call_validity": {"is_analyzable": False, "reason": reason, "conversation_type": "no_conversation"},
@@ -122,6 +164,10 @@ class Pipeline:
         meta = {"call_datetime": a["call_datetime"], "duration_seconds": a["real_duration"], "direction": a["direction"],
                 "seller_name": a["seller_name"]}
         out = await asyncio.wait_for(self.analyzer.analyze(tr, meta, seller_speaker=seller), STAGE_TIMEOUT["analyzing"])
+        sps = {x.speaker for x in tr.segments if x.speaker}
+        if seller in sps:  # گوینده‌ها را خودمان برچسب زده‌ایم؛ نقش‌ها را مدل نمی‌تواند خلاف آن گزارش کند
+            p = out.result.setdefault("participants", {})
+            p["seller_speaker"], p["customer_speaker"] = seller, next((x for x in sorted(sps) if x != seller), None)
         u = out.usage
         self.db.log_usage(aid, "analysis", self.analyzer.model, u["tokens_in"], u["tokens_out"],
                           cost=0.0 if self.settings.llm_provider != "anthropic" else estimate_llm_cost(u["tokens_in"], u["tokens_out"]))

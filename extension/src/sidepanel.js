@@ -28,6 +28,7 @@ const ICONS = {
   alert: ['M12 4l9 16H3z', 'M12 10v4', 'M12 17h.01'],
   bolt: ['M13 3L5 14h6l-1 7 8-11h-6z'],
   user: ['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M4 21a8 8 0 0 1 16 0'],
+  headset: ['M4 14v-2a8 8 0 0 1 16 0v2', 'M4 14h3v5H4z', 'M17 14h3v5h-3z', 'M20 19a4 4 0 0 1-4 3h-2'],
   phone: ['M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z'],
   calendar: ['M5 6h14v14H5z', 'M5 10h14', 'M9 3v4', 'M15 3v4'],
   clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2'],
@@ -62,7 +63,7 @@ const mmss = (s) => { const t = Math.max(0, Math.floor(s)); return fa.format(Mat
 const toSec = (t) => String(t || '0').split(':').map(Number).reduce((a, n) => a * 60 + (n || 0), 0);
 const dateFa = (iso) => { try { return new Intl.DateTimeFormat('fa-IR-u-ca-persian', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso)); } catch { return iso || ''; } };
 const leadLabel = (k) => LEAD[k.replace(/\(.*?\)/g, '').trim()] || k;
-let tab = 'analysis', timer = null, SELLERS = {};
+let tab = 'analysis', timer = null, SELLERS = {}, viewKind = 'empty'; // viewKind: empty | live | report (برای دنبال‌کردن خودکار کار تازه)
 const sellerName = (a) => a.seller_name || SELLERS[a.seller_ext] || (a.seller_ext ? 'داخلی ' + a.seller_ext : '—');
 const applyTheme = (th) => { if (th === 'light' || th === 'dark') document.documentElement.dataset.theme = th; else delete document.documentElement.dataset.theme; };
 
@@ -275,11 +276,20 @@ function renderAnalysis(a, audio) {
 }
 
 async function load(uid) {
-  clearTimeout(timer);
+  if (LiveView.isShowing(uid)) return; // نمای زنده همین تماس در حال اجراست
+  clearTimeout(timer); LiveView.stop();
   $('#view').replaceChildren(skeleton());
   const r = await api('/api/v1/analyses/by-unique-id/' + encodeURIComponent(uid));
-  if (r.error) { $('#view').replaceChildren(errState('دریافت نتیجه ممکن نشد', r, () => load(uid))); return; }
+  if (r.error) {
+    if (r.code === 'not_found') { // هنوز روی سرور نیست؛ اگر کار فعالی در افزونه دارد، نمای زنده
+      const { jobs } = await call('GET_JOBS'); const j = (jobs || {})[uid];
+      if (j && ['queued', 'downloading', 'uploading', 'processing'].includes(j.state) && tab === 'analysis') { LiveView.show({ uid, number: j.meta && j.meta.dst, sub: jobSub(j.meta), jobState: j.state }); return; }
+    }
+    $('#view').replaceChildren(errState('دریافت نتیجه ممکن نشد', r, () => load(uid))); return;
+  }
   let cur = r.data; const full = await api('/api/v1/analyses/' + cur.id); if (full.data) cur = full.data;
+  if (tab !== 'analysis') return;
+  if (!['done', 'failed'].includes(cur.status)) { LiveView.show({ uid, aid: cur.id, number: cur.dst_masked, sub: sellerName(cur) + (cur.call_datetime ? ' · ' + dateFa(cur.call_datetime) : ''), status: cur.status }); return; }
   let audio = null;
   if (cur.audio_path) {
     audio = el('audio', null, null, { controls: '' });
@@ -288,9 +298,9 @@ async function load(uid) {
       .then((x) => (x.ok ? x.blob() : null)).then((b) => { if (b) audio.src = URL.createObjectURL(b); }).catch(() => {});
   }
   if (tab !== 'analysis') return;
-  renderAnalysis(cur, audio);
-  if (!['done', 'failed'].includes(cur.status)) timer = setTimeout(() => load(uid), 3000);
+  viewKind = 'report'; renderAnalysis(cur, audio);
 }
+const jobSub = (m) => (m ? ((m.extension && (SELLERS[m.extension] || 'داخلی ' + m.extension)) || '') + (m.date ? ' · ' + m.date + (m.time ? ' ' + m.time : '') : '') : '');
 
 /* ---------- صف ---------- */
 async function renderQueue() {
@@ -317,7 +327,7 @@ async function renderQueue() {
       const mkb = (t, fn, cls) => { const b = el('button', 'btn sm ' + (cls || ''), t); b.onclick = fn; return b; };
       if (j.state === 'done') it.append(mkb('مشاهده', () => { chrome.storage.local.set({ focusUid: uid }); setTab('analysis'); }, 'primary'));
       else if (j.state === 'error') it.append(mkb('تلاش دوباره', () => call('RETRY', { uniqueId: uid })));
-      else if (live(j)) it.append(mkb('لغو', () => call('CANCEL', { uniqueId: uid })));
+      else if (live(j)) { it.append(mkb('مشاهده‌ی زنده', () => { chrome.storage.local.set({ focusUid: uid }).then(() => setTab('analysis')); }, 'primary'), mkb('لغو', () => call('CANCEL', { uniqueId: uid }))); }
       l.append(it);
     }); v.append(l);
   };
@@ -385,9 +395,16 @@ function buildNav() {
   TABS.forEach(([k, t, ic]) => { const b = el('button', null, null, { role: 'tab', id: 'tab-' + k, 'data-tab': k, 'aria-selected': k === 'analysis' }); const p = el('span', 'pill'); p.append(icon(ic)); b.append(p, el('span', null, t)); if (k === 'queue') { const bd = el('span', 'badge'); bd.hidden = true; b.append(bd); } b.onclick = () => setTab(k); nav.append(b); });
 }
 function setTab(t) {
-  tab = t; clearTimeout(timer); window.scrollTo(0, 0);
+  tab = t; clearTimeout(timer); LiveView.stop(); window.scrollTo(0, 0);
   document.querySelectorAll('nav.tabs [role=tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === t));
-  ({ analysis: async () => { const { focusUid, backendUrl, token } = await chrome.storage.local.get(['focusUid', 'backendUrl', 'token']); if (!backendUrl || !token) { $('#view').replaceChildren(empty('settings', 'اول اتصال را تنظیم کنید', 'آدرس سرور تحلیل و توکن دسترسی را در تنظیمات وارد کنید. بعد از آن، تماس‌ها را در صفحه‌ی پنل انتخاب و تحلیل کنید.', { label: 'باز کردن تنظیمات', fn: () => chrome.runtime.openOptionsPage() })); return; } focusUid ? load(focusUid) : $('#view').replaceChildren(empty('analysis', 'هنوز تماسی انتخاب نشده', 'در صفحه‌ی پنل روی امتیاز یک تماس بزنید، یا از تاریخچه یکی را باز کنید.', { label: 'رفتن به تاریخچه', fn: () => setTab('history') })); }, queue: renderQueue, history: renderHistory, compare: renderCompare }[t])();
+  ({ analysis: async () => { const { focusUid, backendUrl, token } = await chrome.storage.local.get(['focusUid', 'backendUrl', 'token']); if (!backendUrl || !token) { $('#view').replaceChildren(empty('settings', 'اول اتصال را تنظیم کنید', 'آدرس سرور تحلیل و توکن دسترسی را در تنظیمات وارد کنید. بعد از آن، تماس‌ها را در صفحه‌ی پنل انتخاب و تحلیل کنید.', { label: 'باز کردن تنظیمات', fn: () => chrome.runtime.openOptionsPage() })); return; } focusUid ? load(focusUid) : (viewKind = 'empty', $('#view').replaceChildren(empty('analysis', 'هنوز تماسی انتخاب نشده', 'در صفحه‌ی پنل روی امتیاز یک تماس بزنید، یا از تاریخچه یکی را باز کنید.', { label: 'رفتن به تاریخچه', fn: () => setTab('history') }))); }, queue: renderQueue, history: renderHistory, compare: renderCompare }[t])();
+}
+
+/** اگر پنل «خالی» است و کاری وارد پردازش شد، خودکار نمای زنده‌اش را باز کن (بدون ربودن گزارشی که کاربر می‌خواند). */
+function followNewJob(jobs) {
+  if (tab !== 'analysis' || viewKind !== 'empty') return;
+  const j = Object.entries(jobs).filter(([, x]) => ['downloading', 'uploading', 'processing'].includes(x.state)).sort((a, b) => b[1].updatedAt - a[1].updatedAt)[0];
+  if (j) chrome.storage.local.set({ focusUid: j[0] });
 }
 
 /* ---------- راه‌اندازی ---------- */
@@ -399,7 +416,7 @@ $('#theme').onclick = async () => { const { theme = 'auto' } = await chrome.stor
 chrome.storage.local.get(['theme', 'sellersText']).then((s) => { applyTheme(s.theme || 'auto'); SELLERS = CASettings.parseSellers(s.sellersText); });
 chrome.storage.onChanged.addListener((ch) => {
   if (ch.theme) applyTheme(ch.theme.newValue); if (ch.sellersText) SELLERS = CASettings.parseSellers(ch.sellersText.newValue);
-  if (ch.focusUid && tab === 'analysis') load(ch.focusUid.newValue); if (ch.jobs) { if (tab === 'queue') renderQueue(); else updateBadge(Object.values(ch.jobs.newValue || {}).filter((j) => ['queued', 'downloading', 'uploading', 'processing'].includes(j.state)).length); }
+  if (ch.focusUid && tab === 'analysis') load(ch.focusUid.newValue); if (ch.jobs) { followNewJob(ch.jobs.newValue || {}); if (tab === 'queue') renderQueue(); else updateBadge(Object.values(ch.jobs.newValue || {}).filter((j) => ['queued', 'downloading', 'uploading', 'processing'].includes(j.state)).length); }
 });
 (async () => {
   const r = await api('/health'); const c = $('#conn');
