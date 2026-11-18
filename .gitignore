@@ -7,3 +7,5 @@ __pycache__/
 .pytest_cache/
 dist/
 *.zip
+# آدرس/توکن مخصوص هر نصب؛ هرگز commit نشود (اگر قبلاً commit شده: git rm --cached extension/src/preset.json)
+extension/src/preset.json

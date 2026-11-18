@@ -12,6 +12,7 @@ uvicorn app.main:app --port 8000
 Docker: `docker compose up -d` (Caddy با HTTPS). تست‌ها: `make test`، `make ext-test`.
 
 ## نصب اکستنشن
+برای کاربران عادی (بدون ادمین) و به‌روزرسانی خودکار: `docs/auto-update.md` و `INSTALL.md`. نصب دستی برای توسعه:
 `chrome://extensions` ← Developer mode ← Load unpacked ← پوشه‌ی `extension/`. سپس تنظیمات: آدرس بک‌اند و توکن. حداقل Chrome 114.
 مقدار `ALLOWED_ORIGINS` را `chrome-extension://<ID>` بگذارید.
 

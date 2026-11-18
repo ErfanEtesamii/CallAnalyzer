@@ -1,6 +1,10 @@
 // Service Worker: صف دانلود/آپلود. حالت در chrome.storage.local می‌ماند چون MV3 هر لحظه می‌تواند بخوابد.
 import './lib/queue.js';
+import './lib/transfer.js';
+import './lib/updater.js';
 const Q = self.CAQueue;
+const T = self.CATransfer;
+const U = self.CAUpdater;
 const DEFAULTS = { backendUrl: '', token: '', minSeconds: 20, concurrency: 2, pollSeconds: 3 };
 const MAX_UPLOAD_MB = 25;
 const controllers = new Map(); // uid ← AbortController (کارهای زنده‌ی همین نمونه‌ی service worker)
@@ -54,22 +58,47 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-async function downloadWav(url, signal) {
+/* دانلود صوت: اول از طریق تب باز پنل (content script؛ گواهی و کوکی صفحه را دارد)، و فقط اگر تبی نبود مستقیم از service worker. */
+async function findPanelTabs(url) {
+  try { return await chrome.tabs.query({ url: new URL(url).origin + '/*' }); } catch (_) { return []; }
+}
+
+async function downloadViaTabs(url, uid, signal) {
+  const tabs = await findPanelTabs(url);
+  for (const tab of tabs) {
+    try {
+      const buf = await T.pullWav((m) => chrome.tabs.sendMessage(tab.id, m), { url, id: uid + ':' + Date.now(), maxBytes: MAX_UPLOAD_MB << 20, signal });
+      return new Blob([buf], { type: 'audio/wav' });
+    } catch (e) {
+      if (e.name === 'AbortError' || e.code) throw e; // خطای واقعی پنل
+      /* تب content script ندارد (مثلاً قبل از نصب افزونه باز شده) → تب بعدی */
+    }
+  }
+  return { tabs: tabs.length };
+}
+
+async function downloadDirect(url, signal, tabCount) {
+  const hint = tabCount
+    ? 'تب پنل پاسخ نمی‌دهد. صفحه‌ی پنل را یک‌بار رفرش کنید و دوباره تلاش کنید.'
+    : 'تب پنل باز نیست. پنل را در یک تب باز کنید (و گواهی را بپذیرید) و دوباره تلاش کنید.';
   let res;
   try { res = await fetch(url, { credentials: 'include', signal }); }
   catch (e) {
     if (e.name === 'AbortError') throw e;
-    throw userError('دانلود از پنل ممکن نشد. یک‌بار پنل را باز کنید و گواهی را بپذیرید.', 'panel_network');
+    throw userError(hint, 'panel_network');
   }
   if (!res.ok) throw userError('پنل پاسخ نامعتبر داد (' + res.status + ').', 'panel_http');
   const len = Number(res.headers.get('content-length') || 0);
   if (len > MAX_UPLOAD_MB << 20) throw userError(`حجم فایل بیش از ${MAX_UPLOAD_MB} مگابایت است.`, 'too_large');
   const buf = await res.arrayBuffer();
-  const head = new Uint8Array(buf.slice(0, 12));
-  const riff = String.fromCharCode(...head.slice(0, 4)) === 'RIFF' && String.fromCharCode(...head.slice(8, 12)) === 'WAVE';
-  if (!riff || buf.byteLength < 2000) throw userError('نشست پنل منقضی شده. یک‌بار وارد پنل شوید و دوباره تلاش کنید.', 'session_expired');
+  if (!T.isWav(new Uint8Array(buf))) throw userError('نشست پنل منقضی شده. یک‌بار وارد پنل شوید و دوباره تلاش کنید.', 'session_expired');
   if (buf.byteLength > MAX_UPLOAD_MB << 20) throw userError(`حجم فایل بیش از ${MAX_UPLOAD_MB} مگابایت است.`, 'too_large');
   return new Blob([buf], { type: 'audio/wav' });
+}
+
+async function downloadWav(url, uid, signal) {
+  const r = await downloadViaTabs(url, uid, signal);
+  return r instanceof Blob ? r : downloadDirect(url, signal, r.tabs);
 }
 
 /** پس از claim شدن توسط pump، state برابر downloading است. */
@@ -85,7 +114,7 @@ async function runJob(uid) {
         if (ex && ex.status === 'done') { await patchJob(uid, { state: 'done', analysisId: ex.id, score: ex.overall_score, grade: ex.grade }); return; }
       } catch (e) { if (e.code !== 'not_found') throw e; }
     }
-    const blob = await downloadWav(m.downloadUrl, ctl.signal);
+    const blob = await downloadWav(m.downloadUrl, uid, ctl.signal);
     job = await alive(); if (!job) return;
     await patchJob(uid, { state: 'uploading' });
     const fd = new FormData();
@@ -157,7 +186,38 @@ async function pump() {
 }
 
 chrome.alarms.create('pump', { periodInMinutes: 0.5 });
-chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'pump') pump(); });
+chrome.alarms.create('selfupdate', { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'pump') pump(); else if (a.name === 'selfupdate') selfUpdate(); });
+
+/* به‌روزرسانی خودکار: همگام‌ساز ویندوز فایل‌ها را روی دیسک عوض می‌کند؛ این‌جا فقط نسخه‌ی manifest روی دیسک با نسخه‌ی در حال اجرا
+   مقایسه می‌شود و در صورت تفاوت (و نبودن کار فعال) اکستنشن خودش را reload می‌کند. جزئیات: lib/updater.js و docs/auto-update.md */
+async function selfUpdate() {
+  try {
+    await U.check({
+      running: chrome.runtime.getManifest().version,
+      readDiskVersion: async () => (await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json()).version,
+      isBusy: async () => Object.values(await getJobs()).some((j) => Q.RUNNING.includes(j.state)),
+      reload: () => chrome.runtime.reload(),
+      load: async () => (await chrome.storage.local.get('updater')).updater,
+      save: (st) => chrome.storage.local.set({ updater: st }),
+      fetchServerVersion: async () => (await api('/api/v1/ext/manifest')).version,
+    });
+  } catch (_) { /* بعداً دوباره تلاش می‌شود */ }
+}
+
+/* بعد از نصب/reload، تب‌های بازِ پنل content script جدید را ندارند (و نمونه‌ی قدیمی مرده است)؛ دوباره تزریق می‌کنیم تا نیازی به F5 نباشد. */
+async function reinjectContentScripts() {
+  try {
+    const defs = [...(chrome.runtime.getManifest().content_scripts || [])];
+    try { defs.push(...(await chrome.scripting.getRegisteredContentScripts())); } catch (_) {}
+    for (const d of defs) {
+      const files = d.js || []; if (!d.matches?.length || !files.length) continue;
+      for (const tab of await chrome.tabs.query({ url: d.matches })) {
+        try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files }); } catch (_) { /* تب ممنوع یا بسته شد */ }
+      }
+    }
+  } catch (_) {}
+}
 /* مقداردهی اولیه از src/preset.json (آدرس سرور و توکن) تا کاربر چیزی وارد نکند؛ فقط اگر هنوز تنظیم نشده باشد */
 async function seedPreset() {
   try {
@@ -167,8 +227,8 @@ async function seedPreset() {
     if (p.backendUrl && p.token) await chrome.storage.local.set({ backendUrl: p.backendUrl, token: p.token });
   } catch (_) { /* preset وجود ندارد */ }
 }
-chrome.runtime.onStartup.addListener(() => seedPreset().then(pump));
-chrome.runtime.onInstalled.addListener(() => seedPreset().then(pump));
+chrome.runtime.onStartup.addListener(() => seedPreset().then(pump).then(selfUpdate));
+chrome.runtime.onInstalled.addListener((d) => seedPreset().then(pump).then(() => (['install', 'update'].includes(d && d.reason) ? reinjectContentScripts() : null)));
 
 chrome.runtime.onMessage.addListener((msg, sender, send) => {
   (async () => {
@@ -191,6 +251,7 @@ chrome.runtime.onMessage.addListener((msg, sender, send) => {
         return { ok: true, cleared: n };
       }
       case 'GET_JOBS': return { jobs: await getJobs() };
+      case 'UPDATE_STATUS': { const m = chrome.runtime.getManifest(); return { version: m.version, versionName: m.version_name || m.version, ...((await chrome.storage.local.get('updater')).updater || {}) }; }
       case 'BATCH_STATUS': {
         try { return { data: await api('/api/v1/analyses/batch-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unique_ids: msg.uniqueIds }) }) }; }
         catch (e) { return { error: e.userMessage, code: e.code }; }

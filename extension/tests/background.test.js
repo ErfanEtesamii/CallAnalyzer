@@ -5,6 +5,7 @@ const assert = require('node:assert');
 let skew = 0; const realNow = Date.now; Date.now = () => realNow() + skew;
 const realST = setTimeout; globalThis.setTimeout = (fn, ms, ...a) => realST(fn, ms >= 2000 ? 10 : ms, ...a);
 globalThis.self = globalThis;
+globalThis.btoa ??= (x) => Buffer.from(x, 'binary').toString('base64');
 
 const store = {}; const badges = []; let handler = null;
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -17,23 +18,42 @@ globalThis.chrome = {
   alarms: { create() {}, onAlarm: { addListener() {} } },
   runtime: { onStartup: { addListener() {} }, onInstalled: { addListener() {} }, onMessage: { addListener: (fn) => { handler = fn; } } },
   sidePanel: { setPanelBehavior() {}, open: async () => {} },
+  // تب‌های باز پنل؛ هر تب یک content script واقعی (CATransfer.createPanelFetcher) با fetch مخصوص صفحه دارد
+  tabs: {
+    query: async ({ url }) => tabsOpen.filter((t) => url === t.origin + '/*'),
+    sendMessage: async (id, msg) => {
+      const t = tabsOpen.find((x) => x.id === id);
+      if (!t || !t.fetcher) throw new Error('Could not establish connection. Receiving end does not exist.');
+      return clone(await t.fetcher.handle(msg));
+    },
+  },
 };
+const tabsOpen = [];
 const send = (msg) => new Promise((res) => handler(msg, { tab: { id: 1 } }, res));
 
 // ---- شبکه‌ی ساختگی ----
-const net = { panel: 'ok', uploadFail: 0, hang: new Set(), inDl: 0, maxDl: 0, uploads: [], nextId: 1, existing: new Set() };
-const wav = () => { const b = new Uint8Array(4000); b.set([82, 73, 70, 70], 0); b.set([87, 65, 86, 69], 8); return b.buffer; };
+const net = { swDirect: 0, bigWav: 0, panel: 'ok', uploadFail: 0, hang: new Set(), inDl: 0, maxDl: 0, uploads: [], nextId: 1, existing: new Set() };
+const wav = (n = 4000) => { const b = new Uint8Array(n); b.set([82, 73, 70, 70], 0); b.set([87, 65, 86, 69], 8); return b.buffer; };
+// fetch داخل صفحه‌ی پنل: گواهی و نشست دارد
+const pageFetch = async (url, opts = {}) => {
+  net.inDl++; net.maxDl = Math.max(net.maxDl, net.inDl);
+  try {
+    const id = new URL(url).searchParams.get('id');
+    if (net.hang.has(id)) await new Promise((_, rej) => opts.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+    await new Promise((r) => realST(r, 5));
+    if (net.panel === 'expired') return new Response('<html>login</html>', { status: 200 });
+    return new Response(wav(net.bigWav || 4000), { status: 200 });
+  } finally { net.inDl--; }
+};
+const openPanelTab = (id = 1, withScript = true) => {
+  const t = { id, origin: 'https://panel', fetcher: withScript ? self.CATransfer.createPanelFetcher({ fetchFn: pageFetch, baseHref: 'https://panel/index.php' }) : null };
+  tabsOpen.push(t); return t;
+};
 globalThis.fetch = async (url, opts = {}) => {
   url = String(url);
-  if (url.startsWith('https://panel/')) {
-    net.inDl++; net.maxDl = Math.max(net.maxDl, net.inDl);
-    try {
-      const id = new URL(url).searchParams.get('id');
-      if (net.hang.has(id)) await new Promise((_, rej) => opts.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
-      await new Promise((r) => realST(r, 5));
-      if (net.panel === 'expired') return new Response('<html>login</html>', { status: 200 });
-      return new Response(wav(), { status: 200 });
-    } finally { net.inDl--; }
+  if (url.startsWith('https://panel/')) { // service worker: گواهی self-signed را نمی‌پذیرد، مثل Chrome واقعی
+    net.swDirect++;
+    throw new TypeError('Failed to fetch (net::ERR_CERT_AUTHORITY_INVALID)');
   }
   const u = new URL(url), p = u.pathname;
   const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json' } });
@@ -55,6 +75,7 @@ test('بارگذاری و تنظیمات', async () => {
   Object.assign(store, { backendUrl: 'https://api.local', token: 'tok', pollSeconds: 2, concurrency: 2, jobs: {} });
   await import('../src/background.js');
   assert.ok(handler);
+  openPanelTab(1);
 });
 
 test('جریان کامل + فرستادن داخلی و مدت واقعی + dedupe', async () => {
@@ -136,4 +157,44 @@ test('پاک‌سازی تمام‌شده‌ها', async () => {
   const r = await send({ type: 'CLEAR_FINISHED' });
   assert.ok(r.cleared >= 5);
   assert.ok(!Object.values(jobs()).some((j) => j.state === 'done'));
+});
+
+test('دانلود از طریق تب پنل انجام می‌شود، نه service worker (رفع خطای ERR_CERT_AUTHORITY_INVALID)', async () => {
+  net.swDirect = 0;
+  await send({ type: 'ENQUEUE', rows: [row('t1')] }); await settle();
+  assert.strictEqual(jobs().t1.state, 'done');
+  assert.strictEqual(net.swDirect, 0);
+});
+
+test('فایل بزرگ (چند تکه) سالم منتقل و آپلود می‌شود', async () => {
+  net.bigWav = 1300000; // بیش از دو تکه‌ی ۵۱۲ کیلوبایتی
+  let size = -1; const realBody = net.uploads.length;
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (u, o = {}) => { if (String(u).endsWith('/api/v1/analyses') && o.method === 'POST') size = o.body.get('file').size; return orig(u, o); };
+  await send({ type: 'ENQUEUE', rows: [row('big1')] }); await settle();
+  globalThis.fetch = orig; net.bigWav = 0;
+  assert.strictEqual(jobs().big1.state, 'done');
+  assert.strictEqual(size, 1300000);
+  assert.ok(net.uploads.length > realBody);
+});
+
+test('تب باز ولی بدون content script ← پیام راهنما برای رفرش', async () => {
+  tabsOpen.length = 0; openPanelTab(2, false);
+  await send({ type: 'ENQUEUE', rows: [row('nc1')] });
+  await waitFor(() => jobs().nc1 && jobs().nc1.error);
+  assert.match(jobs().nc1.error, /رفرش/);
+  assert.strictEqual(jobs().nc1.errorCode, 'panel_network');
+});
+
+test('هیچ تب پنلی باز نیست ← پیام راهنما برای باز کردن پنل', async () => {
+  tabsOpen.length = 0;
+  await send({ type: 'RETRY', uniqueId: 'nc1' });
+  await waitFor(() => jobs().nc1 && /باز نیست/.test(jobs().nc1.error || ''));
+  await send({ type: 'CANCEL', uniqueId: 'nc1' });
+});
+
+test('با باز شدن تب پنل، همان کار بعداً موفق می‌شود', async () => {
+  openPanelTab(3);
+  await send({ type: 'RETRY', uniqueId: 'nc1' }); await settle();
+  assert.strictEqual(jobs().nc1.state, 'done');
 });

@@ -1,0 +1,4 @@
+{
+  "backendUrl": "http://192.168.10.5:8000",
+  "token": "PUT_API_TOKEN_HERE"
+}

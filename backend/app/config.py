@@ -43,6 +43,7 @@ class Settings:
     log_level: str = "INFO"
     rubric_dir: str = "../rubric"
     sellers_file: str = "../config/sellers.json"
+    extension_dir: str = "../extension"
 
     @classmethod
     def from_env(cls, dotenv: str | None = ".env") -> "Settings":
@@ -69,4 +70,5 @@ class Settings:
             log_level=e("LOG_LEVEL", "INFO"),
             rubric_dir=e("RUBRIC_DIR", "../rubric"),
             sellers_file=e("SELLERS_FILE", "../config/sellers.json"),
+            extension_dir=e("EXTENSION_DIR", "../extension"),
         )

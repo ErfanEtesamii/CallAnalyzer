@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import os
 import secrets
 import shutil
@@ -11,7 +12,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from app.analysis.analyzer import Analyzer, AnthropicLLM
@@ -20,6 +21,7 @@ from app.audio.preprocess import is_riff_wave
 from app.auth import RateLimiter, make_auth
 from app.config import Settings
 from app.db import DB
+from app.ext_dist import BundleCache, make_zip
 from app.jobs import Pipeline
 from app.stt.registry import build_provider
 from app.util import hash_phone, hms_to_seconds, mask_phone, parse_filename
@@ -62,6 +64,7 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
     pipe = Pipeline(s, db, stt_factory or (lambda: build_provider(s, vocab_prompt=vocab)),
                     Analyzer(rubric, llm, s.analysis_model, s.redact_pii) if llm else None, sellers)  # type: ignore[arg-type]
     state = {"rubric": rubric}
+    ext_cache = BundleCache(s.extension_dir)
     storage = Path(s.storage_dir); storage.mkdir(parents=True, exist_ok=True)
 
     app = FastAPI(title="Call Analyzer", version=VERSION)
@@ -73,9 +76,36 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
     def health():
         return {"ok": True, "llm": llm is not None, "stt": s.stt_provider}
 
+    def _ext_bundle():
+        try:
+            return ext_cache.get()
+        except FileNotFoundError:
+            raise HTTPException(404, "پوشه‌ی extension روی سرور پیدا نشد (EXTENSION_DIR).")
+
     @app.get("/api/v1/version")
     def version(_: str = Depends(auth)):
-        return {"backend": VERSION, "rubric": state["rubric"].version, "model": s.analysis_model}
+        try:
+            ext_build = ext_cache.get().build
+        except FileNotFoundError:
+            ext_build = None
+        return {"backend": VERSION, "rubric": state["rubric"].version, "model": s.analysis_model, "extension_build": ext_build}
+
+    # --- توزیع اکستنشن (برای همگام‌سازی خودکار کامپیوترهای کاربران؛ بدون ری‌استارت سرور) ---
+    @app.get("/api/v1/ext/manifest")
+    def ext_manifest(_: str = Depends(auth)):
+        return Response(json.dumps(_ext_bundle().index()), media_type="application/json", headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/v1/ext/file/{path:path}")
+    def ext_file(path: str, _: str = Depends(auth)):
+        data = _ext_bundle().files.get(path)
+        if data is None:
+            raise HTTPException(404, "فایل یافت نشد.")
+        return Response(data, media_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+                        headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/v1/ext/bundle.zip")
+    def ext_zip(_: str = Depends(auth)):
+        return Response(make_zip(_ext_bundle()), media_type="application/zip", headers={"Cache-Control": "no-store"})
 
     @app.post("/api/v1/analyses", status_code=202)
     async def create(bg: BackgroundTasks, file: UploadFile = File(...), unique_id: str = Form(...),

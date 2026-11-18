@@ -1,8 +1,24 @@
 /* Content script: تزریق UI داخل Shadow DOM به جدول DataTables پنل Issabel. */
 (() => {
+  /* بعد از به‌روزرسانی افزونه، نمونه‌ی قدیمیِ این اسکریپت در صفحه می‌ماند (مرده)؛ آثار سراسری‌اش (ستون انتخاب‌همه و نوار پایین) را پاک می‌کنیم
+     تا نمونه‌ی جدید بدون تکرار جایگزین شود. هاست‌های ردیف‌ها بازاستفاده می‌شوند (decorateRow wrap قدیمی را عوض می‌کند). */
+  document.querySelectorAll('th.ca-th, .ca-bar-host').forEach((n) => n.remove());
+  /* هر نمونه شناسه‌ای روی <html> می‌گذارد؛ نمونه‌ی قدیمی که کنار آمده دیگر چیزی در صفحه نمی‌کشد (observerهایش بی‌اثر می‌شوند). */
+  const INSTANCE = Math.random().toString(36).slice(2);
+  document.documentElement.dataset.caInstance = INSTANCE;
+  const alive = () => document.documentElement.dataset.caInstance === INSTANCE;
   const P = self.CAParser, CS = self.CASettings;
   const CAQ = self.CAQueue || { isActive: (j) => ['queued', 'downloading', 'uploading', 'processing'].includes(j.state), totalMinutes: () => 0 };
   const state = { rows: new Map(), selected: new Set(), jobs: {}, results: {}, minSeconds: 20, cdr: {}, s: CS.normalize({}), extList: [], order: [], lastUid: null, selectAll: null };
+  /* دانلود صوت از طرف service worker: این‌جا اجرا می‌شود چون همین صفحه گواهی و نشست پنل را دارد. */
+  if (self.CATransfer && chrome.runtime.onMessage) {
+    const fetcher = self.CATransfer.createPanelFetcher({ fetchFn: (u, o) => fetch(u, o), baseHref: location.href });
+    chrome.runtime.onMessage.addListener((msg, _sender, send) => {
+      if (!msg || !/^WAV_|^FETCH_WAV$/.test(msg.type)) return false;
+      fetcher.handle(msg).then(send, (e) => send({ ok: false, code: 'panel_network', message: String(e && e.message || e) }));
+      return true;
+    });
+  }
   const IS_CDR = /[?&]menu=cdrreport/.test(location.search);
   const CSS = `
 :host{all:initial;font-family:Vazirmatn,Tahoma,system-ui,sans-serif;direction:rtl}
@@ -132,8 +148,9 @@
 
   let barHost = null;
   function renderBar() {
+    if (!alive()) return;
     if (!barHost) {
-      barHost = mk('div'); barHost.attachShadow({ mode: 'open' }).appendChild(Object.assign(document.createElement('style'), { textContent: CSS }));
+      barHost = mk('div', 'ca-bar-host'); barHost.attachShadow({ mode: 'open' }).appendChild(Object.assign(document.createElement('style'), { textContent: CSS }));
       document.body.appendChild(barHost);
     }
     const sr = barHost.shadowRoot; sr.querySelector('.bar')?.remove();
@@ -155,6 +172,7 @@
 
   let busy = false, dirty = false;
   function refresh() {
+    if (!alive()) return;
     if (busy) { dirty = true; return; } // فراخوانیِ حین مشغولی گم نشود
     busy = true;
     try {
@@ -187,6 +205,7 @@
   }
 
   async function syncStatuses() {
+    if (!alive()) return;
     const uids = [...state.rows.keys()].filter((u) => !state.jobs[u]);
     if (!uids.length) return;
     const r = await chrome.runtime.sendMessage({ type: 'BATCH_STATUS', uniqueIds: uids.slice(0, 200) });
@@ -196,6 +215,7 @@
 
   // ---------- صفحه‌ی ریز مکالمات: خواندن و ذخیره‌ی داده‌ی CDR ----------
   async function scrapeCdr() {
+    if (!alive()) return;
     const rows = [];
     for (const tr of document.querySelectorAll('table tbody tr')) {
       if (tr.querySelector('.dataTables_empty')) continue;

@@ -3,7 +3,10 @@ const isLan = (h) => h === 'localhost' || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|
 const CS = CASettings, KEYS = Object.keys(CS.DEFAULTS);
 const BOOL = ['includeInternal', 'autoAnalyze', 'showScoreInPill'];
 const say = (el, text, bad) => { el.textContent = text; el.style.color = bad ? 'var(--danger)' : ''; };
-$('#ver').textContent = chrome.runtime.getManifest().version;
+{ const m = chrome.runtime.getManifest(); $('#ver').textContent = m.version_name || m.version; }
+chrome.runtime.sendMessage({ type: 'UPDATE_STATUS' }).then((u) => {
+  if (u && u.syncStale) { const n = $('#syncWarn'); n.hidden = false; }
+}).catch(() => {});
 
 function fill(s) {
   for (const k of KEYS) { const e = $('#' + k); if (!e) continue; if (BOOL.includes(k)) e.checked = !!s[k]; else e.value = s[k] ?? ''; }
@@ -40,7 +43,7 @@ async function ensureAccess(s) {
   if (custom) { const u = new URL(s.panelOrigin); if (u.protocol !== 'https:' && !isLan(u.hostname)) throw new Error('آدرس پنل باید https باشد (یا localhost).'); origins.push(u.origin + '/*'); }
   if (origins.length && !(await chrome.permissions.request({ origins }))) throw new Error('دسترسی به آدرس داده نشد.');
   try { await chrome.scripting.unregisterContentScripts({ ids: ['ca-panel'] }); } catch { /* ثبت نبود */ }
-  if (custom) await chrome.scripting.registerContentScripts([{ id: 'ca-panel', matches: [s.panelOrigin + '/index.php*'], js: ['src/lib/parser.js', 'src/lib/settings.js', 'src/lib/queue.js', 'src/content.js'], runAt: 'document_idle', persistAcrossSessions: true }]);
+  if (custom) await chrome.scripting.registerContentScripts([{ id: 'ca-panel', matches: [s.panelOrigin + '/index.php*'], js: ['src/lib/parser.js', 'src/lib/settings.js', 'src/lib/queue.js', 'src/lib/transfer.js', 'src/content.js'], runAt: 'document_idle', persistAcrossSessions: true }]);
 }
 
 $('#f').addEventListener('submit', async (e) => {

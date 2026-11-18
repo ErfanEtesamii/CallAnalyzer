@@ -38,7 +38,7 @@ def load(pg, url, body, seed_cdr):
     pg.add_script_tag(content=MOCK)
     pg.add_script_tag(path=str(EXT / "src/lib/parser.js"))
     if seed_cdr: print("cdr entries seeded:", pg.evaluate(SEED, CDR))
-    for f in ("settings.js", "queue.js"): pg.add_script_tag(path=str(EXT / "src/lib" / f))
+    for f in ("settings.js", "queue.js", "transfer.js"): pg.add_script_tag(path=str(EXT / "src/lib" / f))
     pg.add_script_tag(path=str(EXT / "src/content.js"))
     pg.wait_for_timeout(900)
 
@@ -84,16 +84,29 @@ with sync_playwright() as p:
     check("پاک‌کردن انتخاب", pg.locator(".bar").count() == 0)
     check("چک‌باکس تماس غیرقابل‌تحلیل غیرفعال است", pg.locator(".ca-host .cb").nth(0).is_disabled())
 
+    # ---- بارگذاری مجدد افزونه: نمونه‌ی جدید content script روی صفحه‌ای که نمونه‌ی قدیمی دارد، آثار تکراری نمی‌سازد ----
+    pg.locator(".ca-host").nth(5).locator(".cb").click(); pg.wait_for_timeout(250)   # نوار انتخاب (barHost) ساخته شود
+    check("پیش از تزریق مجدد: یک نوار", pg.locator(".ca-bar-host").count() == 1, str(pg.locator(".ca-bar-host").count()))
+    pg.add_script_tag(path=str(EXT / "src/content.js")); pg.wait_for_timeout(900)
+    check("بعد از تزریق مجدد: یک ستون انتخاب‌همه", pg.locator("th.ca-th").count() == 1, str(pg.locator("th.ca-th").count()))
+    check("بعد از تزریق مجدد: ردیف‌ها تکراری نشدند", pg.locator(".ca-host").count() == 10, str(pg.locator(".ca-host").count()))
+    check("بعد از تزریق مجدد: نوار قدیمی پاک شد (فقط هاست خالیِ نمونه‌ی جدید)", pg.locator(".ca-bar-host").count() == 1 and pg.locator(".bar").count() == 0, f"hosts={pg.locator('.ca-bar-host').count()} bars={pg.locator('.bar').count()}")
+    pg.locator(".ca-host").nth(8).locator(".cb").click(); pg.wait_for_timeout(250)
+    check("بعد از تزریق مجدد: دقیقاً یک نوار انتخاب", pg.locator(".ca-bar-host").count() == 1 and pg.locator(".bar").count() == 1, f"hosts={pg.locator('.ca-bar-host').count()} bars={pg.locator('.bar').count()}")
+    check("بعد از تزریق مجدد: بدون خطای JS", not errs, str(errs[:3]))
+
     # تماس داخلی با گزینه‌ی فعال‌سازی
     pg.close()
     # صفحه‌ی CDR: ذخیره‌ی داده
     pg = b.new_page(viewport={"width": 1280, "height": 700})
     pg.route("**/*", lambda r: r.fulfill(body="<html></html>", content_type="text/html"))
     errs2 = []; pg.on("pageerror", lambda e: errs2.append(str(e)))
+
+
     pg.goto("http://localhost:9/index.php?menu=cdrreport")
     pg.set_content(f"<!doctype html><html><body><table><tbody>{CDR[CDR.index('<tr'):CDR.rindex('</tbody>')]}</tbody></table></body></html>")
     pg.add_script_tag(content=MOCK)
-    for f in ("parser.js", "settings.js", "queue.js"): pg.add_script_tag(path=str(EXT / "src/lib" / f))
+    for f in ("parser.js", "settings.js", "queue.js", "transfer.js"): pg.add_script_tag(path=str(EXT / "src/lib" / f))
     pg.add_script_tag(path=str(EXT / "src/content.js")); pg.wait_for_timeout(900)
     cdr = pg.evaluate("window.__store.cdr")
     check("صفحه‌ی CDR بدون خطا", not errs2, str(errs2[:2]))

@@ -16,3 +16,5 @@ preview:
 	python3 scripts/make_preview.py
 ext-e2e:
 	cd extension && python3 tests/e2e_content.py
+client:
+	@echo "usage: python3 scripts/make_client.py --url http://SERVER:8000 --token TOKEN"
