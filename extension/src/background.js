@@ -158,8 +158,17 @@ async function pump() {
 
 chrome.alarms.create('pump', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'pump') pump(); });
-chrome.runtime.onStartup.addListener(() => pump());
-chrome.runtime.onInstalled.addListener(() => pump());
+/* مقداردهی اولیه از src/preset.json (آدرس سرور و توکن) تا کاربر چیزی وارد نکند؛ فقط اگر هنوز تنظیم نشده باشد */
+async function seedPreset() {
+  try {
+    const cur = await chrome.storage.local.get(['backendUrl', 'token']);
+    if (cur.backendUrl && cur.token) return;
+    const p = await (await fetch(chrome.runtime.getURL('src/preset.json'))).json();
+    if (p.backendUrl && p.token) await chrome.storage.local.set({ backendUrl: p.backendUrl, token: p.token });
+  } catch (_) { /* preset وجود ندارد */ }
+}
+chrome.runtime.onStartup.addListener(() => seedPreset().then(pump));
+chrome.runtime.onInstalled.addListener(() => seedPreset().then(pump));
 
 chrome.runtime.onMessage.addListener((msg, sender, send) => {
   (async () => {

@@ -1,4 +1,5 @@
 const $ = (s) => document.querySelector(s);
+const isLan = (h) => h === 'localhost' || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
 const CS = CASettings, KEYS = Object.keys(CS.DEFAULTS);
 const BOOL = ['includeInternal', 'autoAnalyze', 'showScoreInPill'];
 const say = (el, text, bad) => { el.textContent = text; el.style.color = bad ? 'var(--danger)' : ''; };
@@ -21,7 +22,7 @@ chrome.storage.local.get(KEYS).then((s) => { fill(CS.normalize(s)); stats(); });
 async function permitBackend(url) {
   if (!url) return true;
   const u = new URL(url);
-  if (u.protocol !== 'https:' && u.hostname !== 'localhost') throw new Error('برای امنیت فقط https مجاز است (به‌جز localhost).');
+  if (u.protocol !== 'https:' && !isLan(u.hostname)) throw new Error('برای امنیت فقط https مجاز است (به‌جز شبکه‌ی داخلی).');
   return chrome.permissions.request({ origins: [u.origin + '/*'] });
 }
 async function ping(msgEl) {
@@ -34,9 +35,9 @@ const DEFAULT_ORIGIN = CS.DEFAULTS.panelOrigin;
 /** اجازه‌ی دسترسی به سرور و پنل در یک درخواست (باید داخل همان کلیک کاربر باشد) و ثبت content script برای آدرس سفارشی پنل */
 async function ensureAccess(s) {
   const origins = [];
-  if (s.backendUrl) { const u = new URL(s.backendUrl); if (u.protocol !== 'https:' && u.hostname !== 'localhost') throw new Error('برای امنیت فقط https مجاز است (به‌جز localhost).'); origins.push(u.origin + '/*'); }
+  if (s.backendUrl) { const u = new URL(s.backendUrl); if (u.protocol !== 'https:' && !isLan(u.hostname)) throw new Error('برای امنیت فقط https مجاز است (به‌جز شبکه‌ی داخلی).'); origins.push(u.origin + '/*'); }
   const custom = s.panelOrigin !== DEFAULT_ORIGIN;
-  if (custom) { const u = new URL(s.panelOrigin); if (u.protocol !== 'https:' && u.hostname !== 'localhost') throw new Error('آدرس پنل باید https باشد (یا localhost).'); origins.push(u.origin + '/*'); }
+  if (custom) { const u = new URL(s.panelOrigin); if (u.protocol !== 'https:' && !isLan(u.hostname)) throw new Error('آدرس پنل باید https باشد (یا localhost).'); origins.push(u.origin + '/*'); }
   if (origins.length && !(await chrome.permissions.request({ origins }))) throw new Error('دسترسی به آدرس داده نشد.');
   try { await chrome.scripting.unregisterContentScripts({ ids: ['ca-panel'] }); } catch { /* ثبت نبود */ }
   if (custom) await chrome.scripting.registerContentScripts([{ id: 'ca-panel', matches: [s.panelOrigin + '/index.php*'], js: ['src/lib/parser.js', 'src/lib/settings.js', 'src/lib/queue.js', 'src/content.js'], runAt: 'document_idle', persistAcrossSessions: true }]);

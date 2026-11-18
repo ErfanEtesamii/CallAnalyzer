@@ -1,6 +1,6 @@
 services:
   backend:
-    build: {context: ., dockerfile: backend/Dockerfile}
+    build: {context: ., dockerfile: backend/Dockerfile, args: {WITH_WHISPER: "${WITH_WHISPER:-0}"}}
     env_file: backend/.env
     volumes: ["./data:/app/backend/data"]
     restart: unless-stopped

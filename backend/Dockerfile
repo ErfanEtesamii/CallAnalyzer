@@ -3,6 +3,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+ARG WITH_WHISPER=0
+RUN if [ "$WITH_WHISPER" = "1" ]; then pip install --no-cache-dir faster-whisper; fi
 COPY backend/ ./backend
 COPY rubric/ ./rubric
 COPY config/ ./config

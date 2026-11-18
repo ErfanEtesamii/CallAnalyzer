@@ -3,6 +3,7 @@
   "name": "تحلیل تماس فراز هنر",
   "description": "تحلیل هوشمند مکالمات ضبط‌شده‌ی فروشندگان از پنل تلفنی",
   "version": "1.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyKUw7wLdsKvER1etLerGz+6HFuU24ypm0WdhKzPBRS3+ixHwmBJUTFxGK/pTXH6a0ly3BIct2I5GiEVVARkZ2YKhFADcr0Pw36JKnC8yT/EXUN08+nCZBXchZlQv48JvmAsbVdnQkzjPKaEcHGXOgw0qgLdywEiNuB1w8QM2aGSOVRu0jA7TAePBpQUz2edI/h0BihAxB3ahjAEmwL7kgdcTE02bSV5rY2+HVO51HJV8gZEi6AznJHo/4Dj2CTDOuQ396Q4Ke/8BDhOPweeX59tTCOu4DkIZV+uXrolAAZIocW6fNb+9GBMwwnnqMIeNvOLOcFWfdy6KxC+uUmZkiQIDAQAB",
   "minimum_chrome_version": "114",
   "permissions": [
     "sidePanel",
@@ -15,7 +16,8 @@
   ],
   "optional_host_permissions": [
     "https://*/*",
-    "http://localhost/*"
+    "http://localhost/*",
+    "http://*/*"
   ],
   "background": {
     "service_worker": "src/background.js",
