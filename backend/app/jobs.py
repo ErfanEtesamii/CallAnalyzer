@@ -21,7 +21,7 @@ from app.util import normalize_fa_text
 
 log = logging.getLogger(__name__)
 
-STAGE_TIMEOUT = {"preprocessing": 180, "transcribing": 1200, "analyzing": 300}
+STAGE_TIMEOUT = {"preprocessing": 180, "transcribing": 1200, "analyzing": 900}
 
 
 class PipelineError(Exception):

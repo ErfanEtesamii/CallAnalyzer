@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 
 import httpx
 
@@ -41,7 +42,9 @@ class GeminiLLM:
     async def _post(self, model: str, body: dict) -> dict:
         async with httpx.AsyncClient(timeout=300, transport=self.transport) as c:
             for i in range(self.max_retries + 1):
+                t0 = time.monotonic()
                 r = await c.post(URL.format(model=model), json=body, headers={"x-goog-api-key": self.api_key})
+                log.warning("gemini %s: http %s in %.1fs (attempt %d)", model, r.status_code, time.monotonic() - t0, i + 1)
                 if r.status_code == 200:
                     return r.json()
                 if r.status_code in _RETRY_STATUS and i < self.max_retries:
