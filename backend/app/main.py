@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from app.analysis.analyzer import Analyzer, AnthropicLLM
+from app.analysis.gemini import GeminiLLM
 from app.analysis.rubric_loader import load_rubric
 from app.audio.preprocess import is_riff_wave
 from app.auth import RateLimiter, make_auth
@@ -60,7 +61,11 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
     rubric = load_rubric(s.rubric_dir)
     sellers = json.loads(Path(s.sellers_file).read_text(encoding="utf-8")) if Path(s.sellers_file).exists() else {}
     vocab = Path("domain_vocab.txt").read_text(encoding="utf-8").replace("\n", "، ") if Path("domain_vocab.txt").exists() else ""
-    llm = llm or (AnthropicLLM(s.anthropic_api_key) if s.anthropic_api_key else None)
+    if llm is None:
+        if s.llm_provider == "gemini":
+            llm = GeminiLLM(s.gemini_api_key, thinking_budget=s.gemini_thinking_budget) if s.gemini_api_key else None
+        else:
+            llm = AnthropicLLM(s.anthropic_api_key) if s.anthropic_api_key else None
     pipe = Pipeline(s, db, stt_factory or (lambda: build_provider(s, vocab_prompt=vocab)),
                     Analyzer(rubric, llm, s.analysis_model, s.redact_pii) if llm else None, sellers)  # type: ignore[arg-type]
     state = {"rubric": rubric}
@@ -74,7 +79,13 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
 
     @app.get("/health")
     def health():
-        return {"ok": True, "llm": llm is not None, "stt": s.stt_provider}
+        return {"ok": True, "llm": llm is not None, "llm_provider": s.llm_provider, "stt": s.stt_provider}
+
+    def _ext_bundle():
+        try:
+            return ext_cache.get()
+        except FileNotFoundError:
+            raise HTTPException(404, "پوشه‌ی extension روی سرور پیدا نشد (EXTENSION_DIR).")
 
     def _ext_bundle():
         try:
@@ -114,7 +125,7 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
                      seller_ext: str = Form(""), direction: str = Form("out"), force: bool = Form(False),
                      user: str = Depends(auth)):
         if pipe.analyzer is None:
-            raise HTTPException(503, "کلید Anthropic روی سرور تنظیم نشده است.")
+            raise HTTPException(503, "کلید مدل تحلیل روی سرور تنظیم نشده است (ANTHROPIC_API_KEY یا GEMINI_API_KEY).")
         ex = db.get_by_uid(unique_id)
         if ex and not force and ex["status"] != "failed":
             return {"id": ex["id"], "status": ex["status"], "existing": True}

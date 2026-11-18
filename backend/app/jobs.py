@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from app.analysis.analyzer import Analyzer
+from app.analysis.errors import LLMError
 from app.analysis.scoring import percentile_rank
 from app.audio import preprocess as pp
 from app.config import Settings
@@ -84,7 +85,7 @@ class Pipeline:
                 s.text = normalize_fa_text(s.text)
             tr.segments = [s for s in tr.segments if s.text]
             self.db.save_transcript(aid, tr.provider, tr.to_json(), {"speech_ratio": info.speech_ratio, "rms": info.rms})
-            self.db.log_usage(aid, "stt", tr.provider, secs=info.duration, cost=info.duration / 60 * COST["stt_per_min"])
+            self.db.log_usage(aid, "stt", tr.provider, secs=info.duration, cost=0.0 if self.settings.stt_provider == "groq" else info.duration / 60 * COST["stt_per_min"])
             text = " ".join(s.text for s in tr.segments)
             if pp.looks_like_voicemail(info.duration, len({s.speaker for s in tr.segments if s.speaker}), text):
                 self._close_no_conversation(aid, "پیغام‌گیر/صندوق صوتی تشخیص داده شد.")
@@ -95,6 +96,8 @@ class Pipeline:
         except asyncio.TimeoutError:
             self.set_status(aid, "failed", error_code="timeout", error_message="پردازش بیش از حد طول کشید؛ دوباره تلاش کنید.")
         except pp.AudioError as e:
+            self.set_status(aid, "failed", error_code=e.code, error_message=e.message)
+        except LLMError as e:
             self.set_status(aid, "failed", error_code=e.code, error_message=e.message)
         except ProviderUnavailable as e:
             self.set_status(aid, "failed", error_code="stt_unavailable", error_message=str(e))
@@ -121,7 +124,7 @@ class Pipeline:
         out = await asyncio.wait_for(self.analyzer.analyze(tr, meta, seller_speaker=seller), STAGE_TIMEOUT["analyzing"])
         u = out.usage
         self.db.log_usage(aid, "analysis", self.analyzer.model, u["tokens_in"], u["tokens_out"],
-                          cost=estimate_llm_cost(u["tokens_in"], u["tokens_out"]))
+                          cost=0.0 if self.settings.llm_provider != "anthropic" else estimate_llm_cost(u["tokens_in"], u["tokens_out"]))
         score = out.result["overall"].get("score")
         pct = percentile_rank(score, self.db.scores_population(a["seller_ext"]) + [score]) if score is not None else None
         self.db.save_result(aid, out.result, out.prompt_version, pct)
@@ -134,6 +137,8 @@ class Pipeline:
             raise PipelineError("no_transcript", "ترنسکریپت موجود نیست؛ تحلیل از ابتدا لازم است.")
         try:
             await self.analyze_transcript(aid, Transcript.from_json(t["segments"], t["provider"]), seller_speaker)
+        except LLMError as e:
+            self.set_status(aid, "failed", error_code=e.code, error_message=e.message)
         except Exception:  # noqa: BLE001
             log.exception("reanalyze failed %s", aid)
             self.set_status(aid, "failed", error_code="internal", error_message="تحلیل مجدد ناموفق بود.")

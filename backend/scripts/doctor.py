@@ -12,9 +12,12 @@ def line(name, good, detail=""):
     ok &= bool(good)
     print(("✓" if good else "✗"), name, detail)
 line("ffmpeg", shutil.which("ffmpeg"))
-line("ANTHROPIC_API_KEY", s.anthropic_api_key)
+if s.llm_provider == "gemini":
+    line("GEMINI_API_KEY", s.gemini_api_key, f"(مدل {s.analysis_model})")
+else:
+    line("ANTHROPIC_API_KEY", s.anthropic_api_key)
 line("API_TOKEN", len(s.api_token) >= 16, "(حداقل ۱۶ نویسه)")
-line("STT", s.stt_provider != "openai" or s.openai_api_key, s.stt_provider)
+line("STT", {"openai": s.openai_api_key, "groq": s.groq_api_key}.get(s.stt_provider, True), s.stt_provider)
 try:
     DB(s.database_url); line("database", True)
 except Exception as e:

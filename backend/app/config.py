@@ -30,6 +30,11 @@ class Settings:
     analysis_model: str = "claude-sonnet-5-5"
     stt_provider: str = "mock"
     openai_api_key: str = ""
+    groq_api_key: str = ""
+    stt_model: str = ""
+    llm_provider: str = "anthropic"     # anthropic | gemini
+    gemini_api_key: str = ""
+    gemini_thinking_budget: int | None = None
     hf_token: str = ""
     min_call_seconds: int = 20
     min_speech_ratio: float = 0.15
@@ -54,9 +59,14 @@ class Settings:
             api_token=e("API_TOKEN", ""),
             allowed_origins=[o.strip() for o in e("ALLOWED_ORIGINS", "").split(",") if o.strip()],
             anthropic_api_key=e("ANTHROPIC_API_KEY", ""),
-            analysis_model=e("ANALYSIS_MODEL", "claude-sonnet-5-5"),
+            analysis_model=e("ANALYSIS_MODEL") or ("gemini-2.5-flash" if e("LLM_PROVIDER", "").strip().lower() == "gemini" else "claude-sonnet-5-5"),
             stt_provider=e("STT_PROVIDER", "mock"),
             openai_api_key=e("OPENAI_API_KEY", ""),
+            groq_api_key=e("GROQ_API_KEY", ""),
+            stt_model=e("STT_MODEL", ""),
+            llm_provider=e("LLM_PROVIDER", "anthropic").strip().lower(),
+            gemini_api_key=e("GEMINI_API_KEY", ""),
+            gemini_thinking_budget=(int(e("GEMINI_THINKING_BUDGET")) if (e("GEMINI_THINKING_BUDGET") or "").strip().lstrip("-").isdigit() else None),
             hf_token=e("HF_TOKEN", ""),
             min_call_seconds=int(e("MIN_CALL_SECONDS", "20")),
             min_speech_ratio=float(e("MIN_SPEECH_RATIO", "0.15")),

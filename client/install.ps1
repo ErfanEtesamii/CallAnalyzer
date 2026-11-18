@@ -14,8 +14,13 @@ $Ext   = Join-Path $Root 'ext'
 $Task  = 'CallAnalyzerExtSync'
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
+# خروجی خطای برنامه‌های native (مثلاً schtasks وقتی تسک وجود ندارد) در PowerShell 5.1 با Stop به استثنا تبدیل می‌شود؛ فقط کد خروج را بررسی می‌کنیم.
+function Invoke-Native([scriptblock]$cmd) {
+  $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  try { & $cmd 2>&1 | Out-Null } finally { $ErrorActionPreference = $old }
+}
 function Remove-Autostart {
-  & schtasks.exe /Delete /F /TN $Task 2>&1 | Out-Null
+  Invoke-Native { schtasks.exe /Delete /F /TN $Task }
   Remove-ItemProperty -Path $RunKey -Name $Task -ErrorAction SilentlyContinue
 }
 if ($Uninstall) {
@@ -34,7 +39,7 @@ if ($BackendUrl -notmatch '^https?://[^/\s]+') { Write-Host 'آدرس سرور �
 
 if (Test-Path (Join-Path $Here 'caddy-root.crt')) {
   Write-Host 'اعتماد به گواهی سرور (اگر پنجره‌ی ویندوز آمد، Yes بزنید)…'
-  & certutil.exe -user -addstore Root (Join-Path $Here 'caddy-root.crt') | Out-Null
+  Invoke-Native { certutil.exe -user -addstore Root (Join-Path $Here 'caddy-root.crt') }
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Ext 'src') | Out-Null
@@ -44,7 +49,9 @@ $preset = @{ backendUrl = $BackendUrl.TrimEnd('/'); token = $Token } | ConvertTo
 [IO.File]::WriteAllText((Join-Path $Ext 'src/preset.json'), $preset, (New-Object Text.UTF8Encoding($false)))
 
 Write-Host 'دانلود اکستنشن از سرور…'
+$old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'sync.ps1') -Root $Root
+$ErrorActionPreference = $old
 if (-not (Test-Path (Join-Path $Ext 'manifest.json'))) {
   Write-Host "دانلود انجام نشد. آدرس/توکن و دسترسی شبکه به $BackendUrl را بررسی کنید. لاگ: $Root\sync.log" -ForegroundColor Red
   exit 1
@@ -54,7 +61,7 @@ if (-not (Test-Path (Join-Path $Ext 'manifest.json'))) {
 Remove-Autostart
 $vbs = Join-Path $Root 'sync.vbs'
 $tr  = "wscript.exe //B //Nologo `"$vbs`""
-& schtasks.exe /Create /F /SC MINUTE /MO 3 /TN $Task /TR $tr 2>&1 | Out-Null
+Invoke-Native { schtasks.exe /Create /F /SC MINUTE /MO 3 /TN $Task /TR $tr }
 if ($LASTEXITCODE -eq 0) { Write-Host 'همگام‌ساز خودکار ثبت شد (Task Scheduler، هر ۳ دقیقه).' }
 else {
   Set-ItemProperty -Path $RunKey -Name $Task -Value "wscript.exe //B //Nologo `"$vbs`" -Loop"

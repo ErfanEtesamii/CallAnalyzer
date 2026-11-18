@@ -1,4 +1,9 @@
 # تغییرات
+HEAD
+
+## 1.2.1
+- ارائه‌دهنده‌های رایگان: STT با Groq (`STT_PROVIDER=groq`) و تحلیل با Gemini (`LLM_PROVIDER=gemini`، خروجی JSON + اعتبارسنجی)، خطای واضح هنگام پر شدن سهمیه. `docs/free-providers.md`.
+2dfaaa6 (feat: free providers (Groq STT, Gemini analysis))
 ## 1.2.0
 - به‌روزرسانی خودکار بدون نصب مجدد: بک‌اند افزونه را از دیسک سرو می‌کند (`/api/v1/ext/*`)، `client/sync.ps1` (بدون ادمین) آن را روی کامپیوتر کاربر همگام می‌کند و افزونه با `lib/updater.js` خودش reload می‌شود. جزئیات: `docs/auto-update.md`.
 - سرور ویندوز: `deploy/auto_update.ps1` + `install_autoupdate.bat` (git pull، pip، پیش‌بررسی، ری‌استارت، health، rollback خودکار، hot-reload روبریک).

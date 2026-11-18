@@ -11,7 +11,11 @@ def build_provider(settings: Settings, name: str | None = None, vocab_prompt: st
         return MockSTT()
     if name == "openai":
         from app.stt.providers.openai_provider import OpenAISTT
-        return OpenAISTT(settings.openai_api_key, prompt=vocab_prompt)
+        return OpenAISTT(settings.openai_api_key, model=settings.stt_model or "whisper-1", prompt=vocab_prompt)
+    if name == "groq":  # Whisper رایگان Groq (API سازگار با OpenAI)
+        from app.stt.providers.openai_provider import OpenAISTT
+        return OpenAISTT(settings.groq_api_key, model=settings.stt_model or "whisper-large-v3", prompt=vocab_prompt,
+                         base_url="https://api.groq.com/openai/v1", name="groq", key_name="GROQ_API_KEY", max_prompt_chars=600)
     if name in {"faster_whisper", "faster-whisper"}:
         from app.stt.providers.faster_whisper_provider import FasterWhisperSTT
         return FasterWhisperSTT(initial_prompt=vocab_prompt)
