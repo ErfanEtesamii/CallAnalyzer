@@ -64,7 +64,10 @@ def create_app(settings: Settings | None = None, llm=None, stt_factory=None) -> 
     sellers = json.loads(Path(s.sellers_file).read_text(encoding="utf-8")) if Path(s.sellers_file).exists() else {}
     vocab = Path("domain_vocab.txt").read_text(encoding="utf-8").replace("\n", "، ") if Path("domain_vocab.txt").exists() else ""
     if llm is None:
-        if s.llm_provider == "deepseek":
+        if s.llm_provider == "openrouter":  # مدل‌های :free هم هست؛ سقف رایگان: ۲۰ درخواست در دقیقه و ۵۰ در روز
+            from app.analysis.openai_compat import OpenAICompatLLM
+            llm = OpenAICompatLLM(s.openrouter_api_key, base_url="https://openrouter.ai/api/v1", key_name="OPENROUTER_API_KEY") if s.openrouter_api_key else None
+        elif s.llm_provider == "deepseek":
             from app.analysis.openai_compat import OpenAICompatLLM
             llm = OpenAICompatLLM(s.deepseek_api_key, base_url=s.llm_base_url) if s.deepseek_api_key else None
         elif s.llm_provider == "gemini":

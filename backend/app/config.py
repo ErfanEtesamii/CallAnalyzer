@@ -33,9 +33,10 @@ class Settings:
     groq_api_key: str = ""
     xai_api_key: str = ""
     deepseek_api_key: str = ""
+    openrouter_api_key: str = ""
     llm_base_url: str = "https://api.deepseek.com"
     stt_model: str = ""
-    llm_provider: str = "anthropic"     # anthropic | gemini | deepseek
+    llm_provider: str = "anthropic"     # anthropic | gemini | deepseek | openrouter
     gemini_api_key: str = ""
     gemini_thinking_budget: int | None = None
     hf_token: str = ""
@@ -62,12 +63,13 @@ class Settings:
             api_token=e("API_TOKEN", ""),
             allowed_origins=[o.strip() for o in e("ALLOWED_ORIGINS", "").split(",") if o.strip()],
             anthropic_api_key=e("ANTHROPIC_API_KEY", ""),
-            analysis_model=e("ANALYSIS_MODEL") or {"gemini": "gemini-3.8-flash", "deepseek": "deepseek-chat"}.get(e("LLM_PROVIDER", "").strip().lower(), "claude-sonnet-5-5"),
+            analysis_model=e("ANALYSIS_MODEL") or {"gemini": "gemini-3.8-flash", "deepseek": "deepseek-flash", "openrouter": "inclusionai/ling-3.2-flash:free"}.get(e("LLM_PROVIDER", "").strip().lower(), "claude-sonnet-5-5"),
             stt_provider=e("STT_PROVIDER", "mock"),
             openai_api_key=e("OPENAI_API_KEY", ""),
             groq_api_key=e("GROQ_API_KEY", ""),
             xai_api_key=e("XAI_API_KEY", ""),
             deepseek_api_key=e("DEEPSEEK_API_KEY", ""),
+            openrouter_api_key=e("OPENROUTER_API_KEY", ""),
             llm_base_url=e("LLM_BASE_URL", "https://api.deepseek.com"),
             stt_model=e("STT_MODEL", ""),
             llm_provider=e("LLM_PROVIDER", "anthropic").strip().lower(),

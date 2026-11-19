@@ -23,7 +23,8 @@ class OpenAICompatLLM:
                  sleep=asyncio.sleep, timeout: float = 240):
         if not api_key:
             raise RuntimeError(f"{key_name} تنظیم نشده است")
-        self.api_key, self.base_url, self.transport = api_key, base_url.rstrip("/"), transport
+        self.api_key, self.base_url, self.transport, self.key_name = api_key, base_url.rstrip("/"), transport, key_name
+        self.json_mode = os.environ.get("LLM_JSON_MODE", "1") != "0"
         self.max_tokens = max_tokens or int(os.environ.get("LLM_MAX_TOKENS", "8192"))
         self.max_retries, self._sleep, self.timeout = max_retries, sleep, timeout
 
@@ -38,8 +39,15 @@ class OpenAICompatLLM:
                 if r.status_code in _RETRY and i < self.max_retries:
                     await self._sleep(min(30, 5 * 2 ** i))
                     continue
+                if r.status_code == 400 and "response_format" in body and any(k in r.text.lower() for k in ("response_format", "json_object", "json mode", "structured")):
+                    body.pop("response_format")  # این مدل حالت JSON ندارد؛ فقط با دستور داخل پرامپت ادامه می‌دهیم
+                    self.json_mode = False
+                    log.warning("llm %s: no json mode, retrying without response_format", body["model"])
+                    continue
+                if r.status_code == 429 and "per-day" in r.text.lower():
+                    raise LLMError("llm_rate_limit", "سقف روزانه‌ی درخواست‌های رایگان تمام شده است؛ فردا دوباره تلاش کنید یا اعتبار بخرید.")
                 if r.status_code == 401:
-                    raise LLMError("llm_auth", "کلید مدل زبانی نامعتبر است (DEEPSEEK_API_KEY).")
+                    raise LLMError("llm_auth", f"کلید مدل زبانی نامعتبر است ({self.key_name}).")
                 if r.status_code == 402:
                     raise LLMError("llm_balance", "اعتبار حساب مدل زبانی تمام شده است.")
                 if r.status_code == 404 or (r.status_code == 400 and "model" in r.text.lower() and "exist" in r.text.lower()):
@@ -58,8 +66,10 @@ class OpenAICompatLLM:
         sys_text = "\n\n".join(b["text"] for b in system)
         prompt = (f"{user}\n\nخروجی را مستقیماً فقط به‌صورت «یک شیء JSON» برگردان که دقیقاً مطابق JSON Schema زیر باشد "
                   f"(همان آرگومان‌های {tool['name']}؛ بدون هیچ متن، توضیح یا کد-بلاک اضافه). فقط JSON.\n<json_schema>\n{schema}\n</json_schema>")
-        body = {"model": model, "temperature": temperature, "max_tokens": self.max_tokens, "response_format": {"type": "json_object"},
+        body = {"model": model, "temperature": temperature, "max_tokens": self.max_tokens,
                 "messages": [{"role": "system", "content": sys_text}, {"role": "user", "content": prompt}]}
+        if self.json_mode:
+            body["response_format"] = {"type": "json_object"}
         tin = tout = 0
         for attempt in range(2):
             j = await self._post(body)

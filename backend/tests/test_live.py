@@ -375,3 +375,29 @@ def test_refiner_without_diarization_uses_llm_role_and_fixes_text():
     llm = _FakeLLM(lambda u: [{"speaker": "seller", "text": "سلام، آقای پسندیده."}, {"speaker": "customer", "text": "سلام و درود."}])
     out = run(DiarizedRefiner(llm, "m").label([Segment(0, 2, "سلام آقای پسندیده"), Segment(2, 4, "سلام و ندیگه")]))
     assert [(s.speaker, s.text) for s in out] == [(SELLER, "سلام، آقای پسندیده."), (CUSTOMER, "سلام و درود.")]
+
+
+def test_openai_compat_retries_without_json_mode_and_daily_limit():
+    import json
+
+    import httpx
+    import pytest
+
+    from app.analysis.errors import LLMError
+    from app.analysis.openai_compat import OpenAICompatLLM
+    bodies = []
+
+    def h(req):
+        b = json.loads(req.content)
+        bodies.append("response_format" in b)
+        if "response_format" in b:
+            return httpx.Response(400, json={"error": {"message": "response_format json_object is not supported"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}, "finish_reason": "stop"}]})
+
+    llm = OpenAICompatLLM("k", transport=httpx.MockTransport(h), key_name="OPENROUTER_API_KEY")
+    out, _ = run(llm.call_tool(system=[{"type": "text", "text": "s"}], user="u", tool={"name": "t", "input_schema": {}}, model="m:free", temperature=0))
+    assert out == {"ok": True} and bodies == [True, False]
+    day = OpenAICompatLLM("k", transport=httpx.MockTransport(lambda r: httpx.Response(429, text="Rate limit exceeded: free-models-per-day")), sleep=lambda s: asyncio.sleep(0))
+    with pytest.raises(LLMError) as ei:
+        run(day.call_tool(system=[{"type": "text", "text": "s"}], user="u", tool={"name": "t", "input_schema": {}}, model="m", temperature=0))
+    assert ei.value.code in {"llm_rate_limit", "llm_http"}

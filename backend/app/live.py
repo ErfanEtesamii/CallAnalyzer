@@ -243,7 +243,7 @@ def label_model(settings) -> str:
     env = os.environ.get("LABEL_MODEL", "").strip()
     if env:
         return env
-    return {"gemini": "gemini-3.5-flash-lite", "deepseek": settings.analysis_model}.get(settings.llm_provider, "claude-haiku-5-5")
+    return {"gemini": "gemini-3.5-flash-lite", "deepseek": settings.analysis_model, "openrouter": settings.analysis_model}.get(settings.llm_provider, "claude-haiku-5-5")
 
 
 def add_routes(app, pipe, auth, owned) -> None:

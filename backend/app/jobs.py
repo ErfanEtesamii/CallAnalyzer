@@ -120,6 +120,8 @@ class Pipeline:
         self.live.reset(aid)
         stt = self.stt_factory()
         llm = getattr(self.analyzer, "llm", None) if self.analyzer else None
+        if os.environ.get("LIVE_LLM", "1") == "0":  # صرفه‌جویی در سهمیه: در حین رونویسی از مدل زبانی استفاده نشود (نقش‌ها heuristic)
+            llm = None
         if getattr(stt, "raw_diarization", False) or (llm is not None and os.environ.get("REFINE_TRANSCRIPT", "1") != "0"):  # ویرایش املا + نقش
             vf = Path("domain_vocab.txt")
             labeler = DiarizedRefiner(llm, label_model(self.settings), vocab=vf.read_text(encoding="utf-8").replace("\n", "، ")[:600] if vf.exists() else "")
