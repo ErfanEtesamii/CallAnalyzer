@@ -78,9 +78,10 @@ class OpenAICompatLLM:
             tout += u.get("completion_tokens", 0)
             ch = (j.get("choices") or [{}])[0]
             text = (ch.get("message") or {}).get("content") or ""
+            if ch.get("finish_reason") == "length":  # دوباره پرسیدن همان خروجی بلند را باز هم می‌بُرد و فقط وقت می‌سوزاند
+                log.warning("llm output hit max_tokens (%d); not retrying", self.max_tokens)
+                raise LLMError("llm_bad_output", "خروجی مدل به سقف طول رسید؛ LLM_MAX_TOKENS را بیشتر کنید یا مدل سریع‌تری انتخاب کنید.")
             try:
-                if ch.get("finish_reason") == "length":
-                    raise ValueError("truncated")
                 return _extract_json(text), {"tokens_in": tin, "tokens_out": tout, "cache_read": 0, "cache_write": 0}
             except ValueError:
                 log.warning("llm returned bad/truncated json (attempt %d, finish=%s)", attempt + 1, ch.get("finish_reason"))
