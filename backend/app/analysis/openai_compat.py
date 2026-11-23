@@ -20,7 +20,7 @@ _RETRY = {429, 500, 502, 503, 504}
 
 class OpenAICompatLLM:
     def __init__(self, api_key: str, *, base_url: str = "https://api.deepseek.com", key_name: str = "DEEPSEEK_API_KEY",
-                 max_tokens: int | None = None, transport: httpx.AsyncBaseTransport | None = None, max_retries: int = 3,
+                 max_tokens: int | None = None, transport: httpx.AsyncBaseTransport | None = None, max_retries: int = 6,
                  sleep=asyncio.sleep, timeout: float = 240):
         if not api_key:
             raise RuntimeError(f"{key_name} تنظیم نشده است")
@@ -38,7 +38,12 @@ class OpenAICompatLLM:
                 if r.status_code == 200:
                     return r.json()
                 if r.status_code in _RETRY and i < self.max_retries:
-                    await self._sleep(min(30, 5 * 2 ** i))
+                    wait = min(60, 5 * 2 ** i)
+                    try:
+                        wait = max(wait, min(90, float(r.headers.get("retry-after", 0))))
+                    except ValueError:
+                        pass
+                    await self._sleep(wait)
                     continue
                 if r.status_code == 400 and "response_format" in body and any(k in r.text.lower() for k in ("response_format", "json_object", "json mode", "structured")):
                     body.pop("response_format")  # این مدل حالت JSON ندارد؛ فقط با دستور داخل پرامپت ادامه می‌دهیم
@@ -63,7 +68,7 @@ class OpenAICompatLLM:
                 hint = ""
                 if r.status_code == 403:
                     hint = " (دسترسی رد شد؛ معمولاً محدودیت منطقه/آی‌پی سرور، یا فعال‌نبودن پلن/کلید در پنل سرویس‌دهنده)"
-                show = r.status_code in (400, 403) and snippet
+                show = r.status_code in (400, 403, 429) and snippet
                 raise LLMError("llm_http", f"خطای مدل زبانی ({r.status_code}){hint}" + (f": {snippet}" if show else "."))
         raise LLMError("llm_http", "خطای مدل زبانی.")
 
