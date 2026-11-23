@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import os
 import time
 
@@ -57,8 +58,13 @@ class OpenAICompatLLM:
                     why = str((r.json().get("error") or {}).get("message", ""))[:300]
                 except ValueError:
                     pass
-                log.error("llm http %s: %s", r.status_code, why)
-                raise LLMError("llm_http", f"خطای مدل زبانی ({r.status_code})" + (f": {why}" if r.status_code == 400 and why else "."))
+                snippet = why or re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", r.text))[:200].strip()
+                log.error("llm http %s: %s", r.status_code, snippet)
+                hint = ""
+                if r.status_code == 403:
+                    hint = " (دسترسی رد شد؛ معمولاً محدودیت منطقه/آی‌پی سرور، یا فعال‌نبودن پلن/کلید در پنل سرویس‌دهنده)"
+                show = r.status_code in (400, 403) and snippet
+                raise LLMError("llm_http", f"خطای مدل زبانی ({r.status_code}){hint}" + (f": {snippet}" if show else "."))
         raise LLMError("llm_http", "خطای مدل زبانی.")
 
     async def call_tool(self, *, system, user, tool, model, temperature):
