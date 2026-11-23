@@ -118,7 +118,7 @@
   function decorateRow(tr, row) {
     let host = tr.querySelector(':scope > td.ca-cell > .ca-host');
     if (!host) {
-      const td = mk('td', 'ca-cell'); td.style.whiteSpace = 'nowrap';
+      const td = mk('td', 'ca-cell'); td.style.whiteSpace = 'nowrap'; td.style.minWidth = '200px';
       host = mk('div', 'ca-host'); td.appendChild(host); tr.appendChild(td);
       host.attachShadow({ mode: 'open' }).appendChild(Object.assign(document.createElement('style'), { textContent: CSS }));
     }
@@ -180,7 +180,10 @@
       const rows = readRows(found);
       const header = found.table.querySelector('thead tr, tr');
       if (header && !header.querySelector('th.ca-th')) {
-        const th = mk('th', 'ca-th'); const lab = mk('label', 'th'); lab.style.cursor = 'pointer';
+        const th = mk('th', 'ca-th'); th.style.minWidth = '200px'; th.style.width = '200px';
+        /* پنل جدید (JColResizer) جدول را table-layout:fixed با عرض ثابتِ ستون‌ها می‌کند؛ ستون اضافه‌ی ما صفر پیکسل می‌شد و دیده نمی‌شد. */
+        found.table.style.tableLayout = 'auto'; found.table.style.width = 'auto'; found.table.style.minWidth = '100%';
+        const lab = mk('label', 'th'); lab.style.cursor = 'pointer';
         const all = mk('input'); all.type = 'checkbox'; all.title = 'انتخاب همه‌ی تماس‌های قابل‌تحلیل'; all.setAttribute('aria-label', 'انتخاب همه‌ی تماس‌های قابل‌تحلیل');
         lab.addEventListener('click', (e) => e.stopPropagation());
         all.onchange = () => {
